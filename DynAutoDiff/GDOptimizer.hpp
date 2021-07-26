@@ -1,0 +1,5 @@
+#ifndef __DYNAUTODIFF__GDOPTIMIZER__
+#define __DYNAUTODIFF__GDOPTIMIZER__
+
+
+#endif
