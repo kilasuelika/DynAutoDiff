@@ -79,7 +79,7 @@ int main() {
 
 ### GMM Model
 
-The full code is in `examples/ceres_GMM`:
+The full code is in `examples/ceres_GMM`. The dataset has 10 columns. Assuming the data comes from two Gaussian distributions, the following code computes negative log-likelihood:
 
 ```cpp
 auto X = std::make_shared<Var<>>("../../test/gmm_datat5000_10.txt");
