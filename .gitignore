@@ -3,3 +3,4 @@ hello
 CMakeCache.txt
 Makefile
 build/
+.cache/
