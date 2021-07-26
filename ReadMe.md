@@ -54,7 +54,59 @@ If you want to run some examples, then you need to install more. For example the
 
 ### A Hello World Example
 
-### A Sigmoid Neural Network
+```cpp
+#include "DynAutoDiff/DynAutoDiff.hpp"
+
+using namespace std;
+using namespace DynAutoDiff;
+
+int main() {
+    // Create variables and expressions.
+    auto x = vec<double>({1, 2}), Sigma = pmat<double>({2, 1, 1, 2}, 2, 2),
+         y = pvec<double>({2, 3});
+    auto z = transpose(x) * inv(Sigma) * y;
+    GraphManager gm(z);
+
+    // Run automatic differential.
+    gm.run();
+    cout << z->v() << endl << Sigma->val() << endl << Sigma->grad() << endl;
+
+    // Save and load.
+    gm.save("graph.json");
+    auto z1 = gm.load("graph.json");
+};
+```
+
+### GMM Model
+
+The full code is in `examples/ceres_GMM`:
+
+```cpp
+auto X = std::make_shared<Var<>>("../../test/gmm_datat5000_10.txt");
+
+auto I = cmat(10, 10);
+*I = TMat<>::Identity(10, 10); //Set data of I matrix.
+
+auto mu1 = prowvec<double>({10, 10, 10, 10, 10, 10, 10, 10, 10, 10});
+auto sigma1 = pvec<double>( {});
+auto mu2 = prowvec<double>({-10, -10, -10, -10, -10, -10, -10, -10, -10, -10});
+auto sigma2 = pvec<double>( {});
+
+auto w1 = psca(0.5);
+auto p = sigmoid(w1);
+
+auto S1 = rsdot(ivecl(sigma1)) + I; //LL^T+I for positive definite matrices.
+auto S2 = rsdot(ivecl(sigma2)) + I;
+
+auto Xmu1 = offset(X, -mu1), Xmu2 = offset(X, -mu2);
+auto p1v = (1.0 / sqrt(pow(2 * numbers::pi, 10))) / sqrt(det(S1)) *
+               exp(-0.5 * diag(Xmu1 * inv(S1), transpose(Xmu1)));
+auto p2v = (1.0 / sqrt(pow(2 * numbers::pi, 10))) / sqrt(det(S2)) *
+               exp(-0.5 * diag(Xmu2 * inv(S2), transpose(Xmu2)));
+auto ll = -sum(ln(p * p1v + (1 - p) * p2v));
+GraphManager<> gm(ll);
+```
+
 
 ### Using Distributions and Loss Functions
 
