@@ -1,0 +1,1105 @@
+#ifndef __DYNAUTODIFF__
+#define __DYNAUTODIFF__
+#include "EigenHelper.hpp"
+#include "boost/json/src.hpp"
+#include <cmath>
+#include <concepts>
+#include <eigen3/Eigen/src/Core/util/Constants.h>
+#include <functional>
+#include <initializer_list>
+#include <iostream>
+#include <memory>
+#include <queue>
+#include <stack>
+#include <stdexcept>
+#include <utility>
+#include <vector>
+
+#define UNWRAP(...) __VA_ARGS__
+#define STRING(s) #s
+
+namespace DynAutoDiff {
+
+template <typename T> class Var;
+template <typename T> using SVar = std::shared_ptr<Var<T>>;
+
+using SVard = std::shared_ptr<Var<double>>;
+
+template <typename T> struct EvalGradFunctionBase {
+    virtual std::string get_name() const = 0;
+    virtual boost::json::object to_json() const = 0;
+    virtual void eval(TMap<T> &dest, const std::vector<TMap<T>> &inputs) = 0;
+    virtual std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) = 0;
+};
+
+template <typename T1, typename T2> static inline bool shape_match(const T1 &l, const T2 &r) {
+    return (l->rows() == r->rows()) && (l->cols() == r->cols());
+};
+static std::string _shape_str(int r1, int c1, int r2, int c2) {
+    return "(" + std::to_string(r1) + ", " + std::to_string(c1) + ") and (" + std::to_string(r2) +
+           ", " + std::to_string(c2) + ")";
+};
+static inline int _matmul_result_rows(int r1, int c1, int r2, int c2) {
+    if (r1 * c1 == 1) {
+        return r2;
+    } else {
+        return r1;
+    }
+};
+static inline int _matmul_result_cols(int r1, int c1, int r2, int c2) {
+    if (r2 * c2 == 1) {
+        return c1;
+    } else {
+        return c2;
+    }
+};
+
+template <typename T = double> class Var : public std::enable_shared_from_this<struct Var<T>> {
+
+  private:
+    template <typename T1> friend class GraphManager;
+
+    TMap<T> _val, _grad;
+    int _rows = 0;
+    int _cols = 0;
+    int _size = 0;
+    int _id = 0;                         // For saving and loading graph.
+    bool _own_v = false, _own_g = false; // If true, then data is managed by outside.
+    bool _requires_grad = false;
+    bool _evaluated = false;
+    bool _visited = false;
+    bool _leaf = true;
+
+    // bool _is_leaf;
+
+    std::vector<std::shared_ptr<struct Var<T>>> _input_nodes;
+
+    std::allocator<T> _alloc;
+
+    std::unique_ptr<EvalGradFunctionBase<T>> fn = nullptr;
+
+    void _bind(T *val, T *grad, int rows, int cols, bool own_v, bool own_g) {
+        if (val != _val.data()) {
+            new (&_val) TMap<T>(val, rows, cols);
+            _own_v = own_v;
+
+            // Set values to zero.
+            if (own_v) {
+                _val.setZero();
+            }
+
+            _rows = rows;
+            _cols = cols;
+            _size = rows * cols;
+        };
+        if (grad != nullptr) {
+            if (grad != _grad.data()) {
+                new (&_grad) TMap<T>(grad, rows, cols);
+                _own_g = own_g;
+                _requires_grad = true;
+
+                if (own_g) {
+                    _grad.setZero();
+                }
+            }
+        } else {
+            _own_g = false;
+            _requires_grad = false;
+        };
+    };
+
+  public:
+    using Scalar = T;
+
+    Var(){};
+    Var(int rows, int cols, bool requires_grad = false, bool allocate = true)
+        : _rows(rows), _cols(cols), _size(rows * cols), _requires_grad(requires_grad),
+          _val(nullptr, 0, 0), _grad(nullptr, 0, 0) {
+        if (allocate) {
+            T *v = _alloc.allocate(rows * cols);
+            T *g = nullptr;
+            if (requires_grad) {
+                // std::cout << "Allocating gradient memory " << rows << "x" << cols << std::endl;
+                g = _alloc.allocate(rows * cols);
+            };
+            _bind(v, g, rows, cols, true, requires_grad);
+        }
+    };
+    Var(int rows, int cols, bool requires_grad,
+        const std::vector<std::shared_ptr<struct Var<T>>> &input_nodes,
+        std::unique_ptr<EvalGradFunctionBase<T>> fn)
+        : _rows(rows), _cols(cols), _size(rows * cols), _requires_grad(requires_grad),
+          _val(nullptr, 0, 0), _grad(nullptr, 0, 0), _input_nodes(input_nodes), fn(std::move(fn)) {
+        // Allocate memory for values.
+        T *v = _alloc.allocate(rows * cols);
+        T *g = nullptr;
+        if (requires_grad) {
+            // std::cout << "Allocating gradient memory " << rows << "x" << cols << std::endl;
+            g = _alloc.allocate(rows * cols);
+        };
+        _bind(v, g, rows, cols, true, requires_grad);
+    };
+    Var(T *val, T *grad, int rows, int cols)
+        : _rows(rows), _cols(cols), _size(rows * cols), _requires_grad(requires_grad),
+          _val(nullptr, 0, 0), _grad(nullptr, 0, 0) {
+        _bind(val, grad, rows, cols, false, false);
+    };
+    // Read data from file.
+    Var(const std::string &file, bool requires_grad = false)
+        : _val(nullptr, 0, 0), _grad(nullptr, 0, 0) {
+        auto [rows, cols] = decide_shape<T>(file);
+        _rows = rows;
+        _cols = cols;
+        T *v = _alloc.allocate(_rows * _cols);
+        T *g = nullptr;
+        if (requires_grad) {
+            // std::cout << "Allocating gradient memory " << rows << "x" << cols << std::endl;
+            g = _alloc.allocate(rows * cols);
+        };
+        _bind(v, g, rows, cols, true, requires_grad);
+        // Read data
+        std::ifstream f(file);
+        for (int i = 0; i < _rows; ++i) {
+            for (int j = 0; j < _cols; ++j) {
+                f >> _val.coeffRef(i, j);
+            }
+        }
+    };
+    /*Var(const TMat &val){
+
+    };*/
+    void release_memory() {
+        // Remember to deallocate memory.
+        if (_own_v) {
+            // std::cout << "Deallocating value memory. " << std::endl;
+            _alloc.deallocate(_val.data(), _size);
+        }
+        if (_requires_grad) {
+            if (_own_g) {
+                _alloc.deallocate(_grad.data(), _size);
+            };
+        };
+    };
+    ~Var() { release_memory(); };
+
+    int rows() const { return _rows; };
+    int cols() const { return _cols; };
+    int size() const { return _size; };
+    int input_size(int k) const { return _input_nodes[k]->size(); };
+    // constant value begin.
+    const T *cvbegin() const { return _val.data(); };
+    const T *cvend() const { return _val.data() + _size; };
+    T *vbegin() { return _val.data(); };
+    T *vend() { return _val.data() + _size; };
+    const T *cgbegin() const { return _grad.data(); };
+    const T *cgend() const { return _grad.data() + _size; };
+    T *gbegin() { return _grad.data(); };
+    T *gend() { return _grad.data() + _size; };
+    bool requires_grad() const { return _requires_grad; };
+
+    void bind(T *val, T *grad, int rows, int cols) {
+        release_memory();
+
+        _bind(val, grad, rows, cols, false, false);
+    };
+    void bind(T *v, T *g) {
+        release_memory();
+
+        _bind(v, g, _rows, _cols, false, (g == nullptr));
+    };
+    void resize(int rows, int cols, bool requires_grad = false) {
+        release_memory();
+
+        T *v = _alloc.allocate(rows * cols);
+        T *g = nullptr;
+        if (requires_grad) {
+            g = _alloc.allocate(rows * cols);
+        };
+        _bind(v, g, rows, cols, true, requires_grad);
+    };
+    // auto evaluated() const { return _evaluated; };
+
+    const auto &val() const { return _val; };
+    // const auto& va()const {return _val.array();};
+    T v(int i = -1, int j = -1) const {
+        if (i == -1 && j == -1) {
+            return _val.coeff(0, 0);
+        } else if (j == -1) {
+            if (i >= _size)
+                throw std::range_error("Subscript for v() is out-of-bound.");
+            if (_rows == 1) {
+                return _val.coeff(0, i);
+            } else if (_cols == 1) {
+                return _val.coeff(i, 0);
+            } else {
+                throw std::range_error("Invalid subscript. This is a matrix");
+            }
+        } else {
+            return _val.coeff(i, j);
+        }
+    };
+    const auto &grad() const {
+        if (!_requires_grad)
+            throw(std::range_error("This node has no gradient."));
+        else
+            return _grad;
+    };
+    T g(int i = -1, int j = -1) const {
+        if (requires_grad()) {
+            if (i == -1 && j == -1) {
+                return _grad.coeff(0, 0);
+            } else if (j == -1) {
+                if (i >= _size)
+                    throw std::range_error("Subscript for g() is out-of-bound.");
+                if (_rows == 1) {
+                    return _grad.coeff(0, i);
+                } else if (_cols == 1) {
+                    return _grad.coeff(i, 0);
+                } else {
+                    throw std::range_error("Invalid subscript. This is a matrix");
+                }
+            } else {
+                if (i * _cols + j + 1 > _size) {
+                    throw std::range_error("Subscript for g() is out-of-bound.");
+                } else
+                    return _grad.coeff(i, j);
+            }
+        } else {
+            throw std::range_error("This node has no gradient.");
+        }
+    };
+    // const auto& ga()const {return _grad.array();};
+    const auto &input_nodes() const { return _input_nodes; };
+    auto input_node(int k) const { return _input_nodes[k]; };
+
+    const TMap<T> &eval() {
+        if (_evaluated) {
+            return _val;
+        };
+        if (_input_nodes.size() > 0) {
+            std::vector<TMap<T>> inputs;
+            for (size_t i = 0; i < _input_nodes.size(); ++i) {
+                inputs.emplace_back(_input_nodes[i]->eval());
+            };
+            fn->eval(_val, inputs);
+        }
+        _evaluated = true;
+        return _val;
+    };
+    void backward(const TMat<T> &seed) {
+        if (_requires_grad) {
+            if(_leaf)
+                _grad = _grad + seed;
+            else _grad=seed;
+            if (_input_nodes.size() > 0) {
+                std::vector<TMat<T>> grads = fn->grad(this->shared_from_this());
+                for (int i = 0; i < _input_nodes.size(); ++i) {
+                    _input_nodes[i]->backward(grads[i]);
+                };
+            };
+        };
+    };
+    // eval() and backward()
+    const TMap<T> &evalb() {
+        eval();
+        backward();
+        return _val;
+    };
+    void backward() {
+        TMat<T> seed = TMat<T>::Ones(_rows, _cols);
+        backward(seed);
+    };
+    // Assign values.
+    void operator=(std::initializer_list<T> v) {
+        assert(
+            (v.size() == _size) &&
+            "Input size should be equal to the size of variable for operator = initializer_list.");
+        // std::copy(v.begin(), v.end(), _val.data());
+        std::copy(v.begin(), v.end(), _val.data());
+    };
+
+    // Inplacement assign;
+    void operator=(const std::shared_ptr<struct Var<T>> &var){
+
+    };
+    // Assign Eigen data.
+    template <typename TD> void operator=(const TD &data) { _val = data; }
+};
+
+//----------------------------------------------------------------------------------------------------------
+// Convinient function for initializing variables.
+template <typename T = double>
+inline std::shared_ptr<Var<T>> sca(const T &v, bool requires_grad = false) {
+    auto res = std::make_shared<Var<T>>(1, 1, requires_grad);
+    *res = {v};
+    return res;
+};
+// p for parameter.
+template <typename T = double> inline std::shared_ptr<Var<T>> psca(T v = 0.0) {
+    return sca<T>(v, true);
+};
+// c for constant
+template <typename T = double> inline std::shared_ptr<Var<T>> csca(T v = 0.0) {
+    return sca<T>(v, false);
+};
+template <std::floating_point T = double>
+std::shared_ptr<Var<T>> mat(std::initializer_list<T> v, int rows, int cols,
+                            bool requires_grad = false) {
+    auto res = std::make_shared<Var<T>>(rows, cols, requires_grad);
+    *res = v;
+    return res;
+};
+// p for parameter.
+template <typename T = double> inline std::shared_ptr<Var<T>> pmat(int rows, int cols) {
+    return std::make_shared<Var<T>>(rows, cols, true);
+};
+// p for parameter.
+template <typename T = double>
+inline std::shared_ptr<Var<T>> pmat(std::initializer_list<T> v, int rows, int cols) {
+    assert((v.size() == rows * cols) && "Data size is not equal to rows*cols");
+    auto res = std::make_shared<Var<T>>(rows, cols, true);
+    *res = v;
+    return res;
+};
+// c for constant
+template <typename T = double> inline std::shared_ptr<Var<T>> cmat(int rows, int cols) {
+    return std::make_shared<Var<T>>(rows, cols, false);
+};
+template <typename T = double>
+std::shared_ptr<Var<T>> mat(int rows, int cols, bool requires_grad = false) {
+    auto res = std::make_shared<Var<T>>(rows, cols, requires_grad);
+    return res;
+};
+template <typename T = double>
+std::shared_ptr<Var<T>> rowvec(std::initializer_list<T> v, bool requires_grad = false) {
+    auto res = std::make_shared<Var<T>>(1, v.size(), requires_grad);
+    *res = v;
+    return res;
+};
+template <typename T = double> std::shared_ptr<Var<T>> prowvec(std::initializer_list<T> v) {
+    auto res = std::make_shared<Var<T>>(1, v.size(), true);
+    *res = v;
+    return res;
+};
+template <std::floating_point T = double>
+inline std::shared_ptr<Var<T>> vec(std::initializer_list<T> v, bool requires_grad = false) {
+    auto res = std::make_shared<Var<T>>(v.size(), 1, requires_grad);
+    *res = v;
+    return res;
+};
+template <std::floating_point T = double>
+inline std::shared_ptr<Var<T>> vec(int n, bool requires_grad = false) {
+    auto res = std::make_shared<Var<T>>(n, 1, requires_grad);
+    return res;
+};
+template <typename T = double> inline std::shared_ptr<Var<T>> pvec(int n) {
+    auto res = std::make_shared<Var<T>>(n, 1, true);
+    return res;
+};
+template <typename T = double> inline std::shared_ptr<Var<T>> pvec(std::initializer_list<T> v) {
+    auto res = std::make_shared<Var<T>>(v.size(), 1, true);
+    *res = v;
+    return res;
+};
+template <typename T = double> inline std::shared_ptr<Var<T>> cvec(std::initializer_list<T> v) {
+    auto res = std::make_shared<Var<T>>(v.size(), 1, false);
+    *res = v;
+    return res;
+};
+template <typename T = double>
+void bind_seq(T *v, T *g, std::initializer_list<std::shared_ptr<Var<T>>> vars) {
+    int vi = 0, gi = 0;
+    for (auto &var : vars) {
+        var->bind(v + vi, g + gi);
+        vi += var->size();
+        gi += (var->requires_grad()) * var->size();
+    };
+};
+template <typename T = double> auto load(const std::string &file, bool requires_grad = false) {
+    return std::make_shared<Var<T>>(file, requires_grad);
+}
+//-------------------------------------------------------------------------------------------------------------
+// Arithmetic
+// template <typename T = double> class Var { std::shared_ptr<Var<T>> _impl; };
+// negation
+template <typename T> struct NegationEvalGrad : EvalGradFunctionBase<T> {
+    std::string get_name() const override { return "NegationEvalGrad"; };
+    boost::json::object to_json() const override {
+        boost::json::object res;
+        res["name"] = "negation";
+        return res;
+    };
+    void eval(TMap<T> &dest, const std::vector<TMap<T>> &inputs) override { dest = -inputs[0]; };
+    std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) override {
+        return {-current->grad().array()};
+    };
+};
+
+template <typename T> std::shared_ptr<Var<T>> operator-(const std::shared_ptr<Var<T>> &operand) {
+    std::vector<std::shared_ptr<Var<T>>> input_nodes{operand};
+    return std::make_shared<Var<T>>(operand->rows(), operand->cols(), (operand->requires_grad()),
+                                    input_nodes, std::make_unique<NegationEvalGrad<T>>());
+};
+// + - * /
+#define BINARYARITHOP(sym, name, eval_op, result_rows, result_cols, backward_operation_lhs1_0,     \
+                      backward_operation_lhs1_1, backward_operation_rhs1_0,                        \
+                      backward_operation_rhs1_1, backward_operation_0, backward_operation_1,       \
+                      assert_cond, assert_message)                                                 \
+    template <typename T> struct name##EvalGrad : EvalGradFunctionBase<T> {                        \
+        std::string get_name() const override { return STRING(name##EvalGrad); };                  \
+        boost::json::object to_json() const override {                                             \
+            boost::json::object res;                                                               \
+            std::cout << this->get_name() << std::endl;                                            \
+            res["name"] = STRING(name##EvalGrad);                                                  \
+            return res;                                                                            \
+        };                                                                                         \
+        void eval(TMap<T> &dest, const std::vector<TMap<T>> &inputs) override {                    \
+            if (inputs[0].size() == 1) {                                                           \
+                dest = inputs[0].coeff(0, 0) sym inputs[1].array();                                \
+            } else if (inputs[1].size() == 1) {                                                    \
+                dest = inputs[0].array() sym inputs[1].coeff(0, 0);                                \
+            } else {                                                                               \
+                dest = eval_op;                                                                    \
+            }                                                                                      \
+        };                                                                                         \
+        std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) override {               \
+            std::vector<TMat<T>> res(2);                                                           \
+            const auto &G = current->grad();                                                       \
+            const auto &L = current->input_node(0)->val();                                         \
+            const auto &R = current->input_node(1)->val();                                         \
+            if (current->input_size(0) == 1) {                                                     \
+                if (current->input_node(0)->requires_grad())                                       \
+                    res[0] = backward_operation_lhs1_0;                                            \
+                if (current->input_node(1)->requires_grad())                                       \
+                    res[1] = backward_operation_lhs1_1;                                            \
+            } else if (current->input_size(1) == 1) {                                              \
+                if (current->input_node(0)->requires_grad())                                       \
+                    res[0] = backward_operation_rhs1_0;                                            \
+                if (current->input_node(1)->requires_grad())                                       \
+                    res[1] = backward_operation_rhs1_1;                                            \
+            } else {                                                                               \
+                if (current->input_node(0)->requires_grad())                                       \
+                    res[0] = backward_operation_0;                                                 \
+                if (current->input_node(1)->requires_grad())                                       \
+                    res[1] = backward_operation_1;                                                 \
+            };                                                                                     \
+            return res;                                                                            \
+        };                                                                                         \
+    };                                                                                             \
+    template <typename T>                                                                          \
+    std::shared_ptr<Var<T>> operator sym(const std::shared_ptr<Var<T>> &lhs,                       \
+                                         const std::shared_ptr<Var<T>> &rhs) {                     \
+        assert((assert_cond) && assert_message);                                                   \
+        std::vector<std::shared_ptr<Var<T>>> input_nodes{lhs, rhs};                                \
+        auto res = std::make_shared<Var<T>>(result_rows, result_cols,                              \
+                                            (lhs->requires_grad() || rhs->requires_grad()),        \
+                                            input_nodes, std::make_unique<name##EvalGrad<T>>());   \
+        return res;                                                                                \
+    };                                                                                             \
+    template <typename T, typename ST>                                                             \
+    std::shared_ptr<Var<T>> operator sym(const std::shared_ptr<Var<T>> &lhs, const ST &scav) {     \
+        auto rhs = sca(static_cast<T>(scav));                                                      \
+        return lhs sym rhs;                                                                        \
+    };                                                                                             \
+    template <typename T, typename ST>                                                             \
+    std::shared_ptr<Var<T>> operator sym(const ST &scav, const std::shared_ptr<Var<T>> &rhs) {     \
+        auto lhs = sca(static_cast<T>(scav));                                                      \
+        return lhs sym rhs;                                                                        \
+    };
+
+// Plus
+BINARYARITHOP(
+    +, Plus, inputs[0].array() + inputs[1].array(), UNWRAP(std::max(lhs->rows(), rhs->rows())),
+    UNWRAP(std::max(lhs->cols(), rhs->cols())), UNWRAP(eigen_scalar_mat(T(current->grad().sum()))),
+    UNWRAP(current->grad()), UNWRAP(current->grad()),
+    UNWRAP(eigen_scalar_mat(T(current->grad().sum()))), UNWRAP(current->grad()),
+    UNWRAP(current->grad()), shape_match(lhs, rhs) || (lhs->size() == 1) || (rhs->size() == 1),
+    "Mat shape must be equal for + operator or at least one of them is actually a scalar.")
+// minus
+BINARYARITHOP(
+    -, Minus, inputs[0].array() - inputs[1].array(), UNWRAP(std::max(lhs->rows(), rhs->rows())),
+    UNWRAP(std::max(lhs->cols(), rhs->cols())), UNWRAP(eigen_scalar_mat(T(current->grad().sum()))),
+    UNWRAP(-current->grad()), UNWRAP(current->grad()),
+    UNWRAP(eigen_scalar_mat(-T(current->grad().sum()))), UNWRAP(current->grad()),
+    UNWRAP(-current->grad()), shape_match(lhs, rhs) || (lhs->size() == 1) || (rhs->size() == 1),
+    "Mat shape must be equal for - operator or at least one of them is actually a scalar.")
+// times: matrix product.
+BINARYARITHOP(*, Times, inputs[0] * inputs[1],
+              UNWRAP(_matmul_result_rows(lhs->rows(), lhs->cols(), rhs->rows(), rhs->cols())),
+              UNWRAP(_matmul_result_cols(lhs->rows(), lhs->cols(), rhs->rows(), rhs->cols())),
+              UNWRAP(eigen_scalar_mat(T((G.array() * R.array()).sum()))), UNWRAP(G *L.coeff(0, 0)),
+              UNWRAP(G *R.coeff(0, 0)), UNWRAP(eigen_scalar_mat(T((G.array() * L.array()).sum()))),
+              UNWRAP(G *R.transpose()), UNWRAP(L.transpose() * G),
+              (lhs->cols() == rhs->rows()) || (lhs->size() == 1) || (rhs->size() == 1),
+              "Cols of left matrix should be equal to rows of the right matrix for matrix "
+              "multiplication operator * or at least one of them is actually a scalar.")
+// division
+BINARYARITHOP(
+    /, Division, inputs[0].array() + inputs[1].array(), UNWRAP(std::max(lhs->rows(), rhs->rows())),
+    UNWRAP(std::max(lhs->cols(), rhs->cols())),
+    UNWRAP(eigen_scalar_mat(T((G.array() / R.array()).sum()))),
+    UNWRAP(-L.coeff(0, 0) * G.array() / R.array().pow(2)), UNWRAP(G.array() * R.coeff(0, 0)),
+    UNWRAP(eigen_scalar_mat(-T((G.array() * L.array()).sum()) / std::pow(R.coeff(0, 0), 2))),
+    UNWRAP(G.array() / R.array()), UNWRAP(-G.array() * L.array() / R.array().pow(2)),
+    shape_match(lhs, rhs) || (lhs->size() == 1) || (rhs->size() == 1),
+    "Mat shape must be equal for elementwise division operator / or at least one of them "
+    "is actually a scalar.")
+
+// Element-wise product
+template <typename T = double> struct Eprod2EvalGrad : EvalGradFunctionBase<T> {
+    std::string get_name() const override { return "Eprod2EvalGrad"; };
+    boost::json::object to_json() const override {
+        boost::json::object res;
+        res["name"] = "Eprod2EvalGrad";
+        return res;
+    };
+    void eval(TMap<T> &dest, const std::vector<TMap<T>> &inputs) override {
+        const auto &X = inputs[0];
+        const auto &Y = inputs[1];
+        dest = X.array() * Y.array();
+    };
+    std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) {
+        const auto &X = current->input_node(0)->val();
+        const auto &Y = current->input_node(1)->val();
+        const auto &G = current->grad();
+        return {G.array() * Y.array(), G.array() * X.array()};
+    };
+};
+template <typename T = double>
+std::shared_ptr<Var<T>> eprod(const std::shared_ptr<Var<T>> &X, const std::shared_ptr<Var<T>> &Y) {
+    assert(((X->rows() == Y->rows()) && (X->cols() && Y->cols())) &&
+           "A and B must have the same shape for element-wise product eprod(X, Y) operator.");
+    std::vector<std::shared_ptr<Var<T>>> input_nodes{X, Y};
+    return std::make_shared<Var<T>>(1, 1, (X->requires_grad() || Y->requires_grad()), input_nodes,
+                                    std::make_unique<Eprod2EvalGrad<T>>());
+};
+
+// Offset.
+template <typename T = double> struct OffsetEvalGrad : EvalGradFunctionBase<T> {
+    int D;
+    OffsetEvalGrad(int D) : D(D){};
+    std::string get_name() const override { return "OffsetEvalGrad"; };
+    boost::json::object to_json() const override {
+        boost::json::object res;
+        res["name"] = "OffsetEvalGrad";
+        res["D"] = D;
+        return res;
+    };
+    void eval(TMap<T> &dest, const std::vector<TMap<T>> &inputs) override {
+        const auto &X = inputs[0];
+        const auto &x = inputs[1];
+        if (D == 0) {
+            dest = X;
+            for (auto row : dest.rowwise()) {
+                row = row + x;
+            }
+        } else if (D == 1) {
+            dest = X;
+            for (auto col : dest.colwise()) {
+                col = col + x;
+            }
+        } else {
+            throw std::range_error("Shape mismatch for operator offset(X, x).");
+        }
+    };
+    std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) {
+        const auto &X = current->input_node(0)->val();
+        const auto &x = current->input_node(1)->val();
+        const auto &Ga = current->grad().array();
+        if (D == 0) {
+            // x is a row-vector
+            return {Ga, Ga.colwise().sum()};
+        } else {
+            return {Ga, Ga.rowwise().sum()};
+        }
+    };
+};
+template <typename T = double>
+std::shared_ptr<Var<T>> offset(const std::shared_ptr<Var<T>> &X, const std::shared_ptr<Var<T>> &x) {
+    assert((((x->cols() == 1) && (X->rows() == x->rows())) ||
+            ((x->rows() == 1) && (X->cols() == x->cols()))) &&
+           "Please check shape of input to offset(X, x), X must be a matrix. x is a row of column "
+           "vector.");
+    if ((x->cols() == 1) && (X->rows() == x->rows())) {
+        std::vector<std::shared_ptr<Var<T>>> input_nodes{X, x};
+        return std::make_shared<Var<T>>(X->rows(), X->cols(),
+                                        (X->requires_grad() || x->requires_grad()), input_nodes,
+                                        std::make_unique<OffsetEvalGrad<T>>(1));
+    } else if ((x->rows() == 1) && (X->cols() == x->cols())) {
+        std::vector<std::shared_ptr<Var<T>>> input_nodes{X, x};
+        return std::make_shared<Var<T>>(X->rows(), X->cols(),
+                                        (X->requires_grad() || x->requires_grad()), input_nodes,
+                                        std::make_unique<OffsetEvalGrad<T>>(0));
+    } else {
+        throw std::range_error("Shape mismatch for offsex(X, x).");
+    }
+};
+
+//-------------------------------------------------------------------------------------------------------------
+// Unary functions
+#define UNARYFUNCTION(functionname, structname, rows, cols, evalop, gradop, datamember, funargs,   \
+                      funvar, evalextra, gradextra, assertstmt, constructorarg, constructorinit,   \
+                      to_json_exp)                                                                 \
+    template <typename T = double> struct structname##EvalGrad : EvalGradFunctionBase<T> {         \
+        std::string get_name() const override { return STRING(structname##EvalGrad); };            \
+        boost::json::object to_json() const override {                                             \
+            boost::json::object res;                                                               \
+            res["name"] = STRING(functionname);                                                    \
+            to_json_exp return res;                                                                \
+        };                                                                                         \
+        datamember structname##EvalGrad(constructorarg) constructorinit{};                         \
+        void eval(TMap<T> &dest, const std::vector<TMap<T>> &inputs) override {                    \
+            const auto &A = inputs[0];                                                             \
+            evalop                                                                                 \
+        };                                                                                         \
+        std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) override {               \
+            const auto &A = current->input_node(0)->val();                                         \
+            const auto &G = current->grad();                                                       \
+            const auto &Ga = current->grad().array();                                              \
+            gradop                                                                                 \
+        };                                                                                         \
+    };                                                                                             \
+    template <typename T>                                                                          \
+    std::shared_ptr<Var<T>> functionname(const std::shared_ptr<Var<T>> &operand funargs) {         \
+        assertstmt std::vector<std::shared_ptr<Var<T>>> input_nodes{operand};                      \
+        return std::make_shared<Var<T>>(rows, cols, (operand->requires_grad()), input_nodes,       \
+                                        std::make_unique<structname##EvalGrad<T>>(funvar));        \
+    };
+UNARYFUNCTION(exp, Exp, operand->rows(), operand->cols(), UNWRAP(dest = A.array().exp();),
+              UNWRAP(return {Ga * current->val().array()};), , , , , , , , , )
+UNARYFUNCTION(ln, Ln, operand->rows(), operand->cols(), UNWRAP(dest = A.array().log();),
+              UNWRAP(return {Ga / A.array()};), , , , , , , , , )
+UNARYFUNCTION(sin, Sin, operand->rows(), operand->cols(), UNWRAP(dest = A.array().sin();),
+              UNWRAP(return {Ga * A.array().cos()};), , , , , , , , , )
+UNARYFUNCTION(cos, Cos, operand->rows(), operand->cols(), UNWRAP(dest = A.array().cos();),
+              UNWRAP(return {-Ga * A.array().sin()};), , , , , , , , , )
+UNARYFUNCTION(tan, Tan, operand->rows(), operand->cols(), UNWRAP(dest = A.array().tan();),
+              UNWRAP(return {Ga / A.array().cos().pow(2)};), , , , , , , , , )
+UNARYFUNCTION(sinh, Sinh, operand->rows(), operand->cols(), UNWRAP(dest = A.array().sinh();),
+              UNWRAP(return {Ga * A.array().cosh()};), , , , , , , , , )
+UNARYFUNCTION(cosh, Cosh, operand->rows(), operand->cols(), UNWRAP(dest = A.array().cosh();),
+              UNWRAP(return {Ga * A.array().sinh()};), , , , , , , , , )
+UNARYFUNCTION(tanh, Tanh, operand->rows(), operand->cols(), UNWRAP(dest = A.array().tanh();),
+              UNWRAP(return {Ga / A.array().cosh().pow(2)};), , , , , , , , , )
+UNARYFUNCTION(sigmoid, Sigmoid, operand->rows(), operand->cols(),
+              UNWRAP(dest = 1.0 / (1 + (-A.array()).exp());),
+              UNWRAP(auto maexp = (-A.array()).exp();
+                     return {Ga * maexp / (1 + maexp).pow(2)};),
+              , , , , , , , , )
+UNARYFUNCTION(relu, ReLU, operand->rows(), operand->cols(),
+              UNWRAP(dest = A.unaryExpr([](T x) { return x > 0 ? x : 0; });),
+              UNWRAP(return {Ga * A.unaryExpr([](T x) { return x > 0 ? 1 : 0; })};), , , , , , , ,
+              , )
+UNARYFUNCTION(sqrt, Sqrt, operand->rows(), operand->cols(), UNWRAP(dest = A.array().sqrt();),
+              UNWRAP(return {0.5 * Ga * current->val().array() / A.array()};), , , , , , , , , )
+UNARYFUNCTION(pow, Pow, operand->rows(), operand->cols(), UNWRAP(dest = A.array().pow(n);),
+              UNWRAP(return {Ga * n * current->val().array()/A.array()};), UNWRAP(int n;), UNWRAP(, int n), n, ,
+              , , int n,
+              UNWRAP(
+                  : n(n)),
+              UNWRAP(res["n"] = n;))
+
+// Matrix unary function
+UNARYFUNCTION(transpose, Transpose, operand->cols(), operand->rows(), UNWRAP(dest = A.transpose();),
+              UNWRAP(return {G.transpose()};), , , , , , , , , )
+// Self multiplication: A*A^T
+UNARYFUNCTION(lsdot, LSdot, operand->rows(), operand->rows(), UNWRAP(dest = A * A.transpose();),
+              UNWRAP(return {2 * G * A};), , , , , , , , , )
+// Self multiplication: A^T*A
+UNARYFUNCTION(rsdot, RSdot, operand->cols(), operand->cols(), UNWRAP(dest = A.transpose() * A;),
+              UNWRAP(return {2 * A * G};), , , , , , , , , )
+// det
+UNARYFUNCTION(det, Det, 1, 1, UNWRAP(dest.coeffRef(0, 0) = A.determinant();),
+              UNWRAP(return {G.coeff(0, 0) * current->val().coeff(0,0) * A.inverse().transpose()};), , , , , ,
+              UNWRAP(assert((operand->rows() == operand->cols()) &&
+                            "Input should be a square matrix for det.");),
+              , , )
+// logdet
+UNARYFUNCTION(logdet, LogDet, 1, 1, UNWRAP(dest.coeffRef(0, 0) = std::log(T(A.determinant()));),
+              UNWRAP(return {G.coeff(0, 0) * A.inverse().transpose()};), , , , , ,
+              UNWRAP(assert((operand->rows() == operand->cols()) &&
+                            "Input should be a square matrix for logdet.");),
+              , , )
+// inv
+UNARYFUNCTION(inv, Inv, operand->rows(), operand->rows(), UNWRAP(dest = A.inverse();),
+              UNWRAP(return {-(current->val() * G * current->val())};), , , , , ,
+              UNWRAP(assert((operand->rows() == operand->cols()) &&
+                            "Input should be a square matrix for logdet.");),
+              , , )
+// ivech
+static inline auto _s_size(int n) { return (-1 + std::sqrt(1 + 8 * n)) / 2; };
+UNARYFUNCTION(ivech, IVech, _s_size(operand->size()), _s_size(operand->size()),
+              UNWRAP(
+                  int n = dest.rows();
+                  auto f = [n](int i, int j) -> int { return (2 * n - i + 1) * i / 2 + j - i; };
+                  for (int i = 0; i < n; ++i) {
+                      dest.coeffRef(i, i) = *(inputs[0].data() + f(i, i));
+                      for (int j = i + 1; j < n; ++j) {
+                          dest.coeffRef(i, j) = *(inputs[0].data() + f(i, j));
+                          dest.coeffRef(j, i) = dest.coeffRef(i, j);
+                      }
+                  }),
+              UNWRAP(
+                  TMat<T> res = A; int n = G.rows();
+                  auto f = [n](int i, int j) -> int { return (2 * n - i + 1) * i / 2 + j - i; };
+                  for (int i = 0; i < n; ++i) {
+                      *(res.data() + f(i, i)) = G.coeff(i, i);
+                      for (int j = i + 1; j < n; ++j) {
+                          *(res.data() + f(i, j)) = G.coeff(i, j) + G.coeff(j, i);
+                      }
+                  } return {res};),
+              , , , , ,
+              UNWRAP(assert((((operand->rows() == 1) || (operand->cols() == 1)) &&
+                             _s_size(operand->size()) == std::trunc(_s_size(operand->size()))) &&
+                            "Input should be a vector, and the size must be appropriate for lower "
+                            "part of a square matrix.");),
+              , , )
+UNARYFUNCTION(ivecl, IVecl, _s_size(operand->size()), _s_size(operand->size()),
+              UNWRAP(
+                  int n = dest.rows();
+                  auto f = [n](int i, int j) -> int { return (2 * n - i + 1) * i / 2 + j - i; };
+                  for (int i = 0; i < n; ++i) {
+                      dest.coeffRef(i, i) = *(inputs[0].data() + f(i, i));
+                      for (int j = i + 1; j < n; ++j) {
+                          // dest.coeffRef(i, j) = 0;
+                          dest.coeffRef(j, i) = *(inputs[0].data() + f(i, j));
+                      }
+                  }),
+              UNWRAP(
+                  TMat<T> res(A.rows(), A.cols()); res.setZero(); int n = G.rows();
+                  auto f = [n](int i, int j) -> int { return (2 * n - i + 1) * i / 2 + j - i; };
+                  for (int i = 0; i < n; ++i) {
+                      *(res.data() + f(i, i)) = G.coeff(i, i);
+                      for (int j = i + 1; j < n; ++j) {
+                          *(res.data() + f(i, j)) = G.coeff(j, i);
+                      }
+                  } return {res};),
+              , , , , ,
+              UNWRAP(assert((((operand->rows() == 1) || (operand->cols() == 1)) &&
+                             _s_size(operand->size()) == std::trunc(_s_size(operand->size()))) &&
+                            "Input should be a vector, and the size must be appropriate for lower "
+                            "part of a square matrix.");),
+              , , )
+UNARYFUNCTION(ivecu, IVecu, _s_size(operand->size()), _s_size(operand->size()),
+              UNWRAP(
+                  int n = dest.rows();
+                  auto f = [n](int i, int j) -> int { return (2 * n - i + 1) * i / 2 + j - i; };
+                  for (int i = 0; i < n; ++i) {
+                      dest.coeffRef(i, i) = *(inputs[0].data() + f(i, i));
+                      for (int j = i + 1; j < n; ++j) {
+                          dest.coeffRef(i, j) = *(inputs[0].data() + f(i, j));
+                          dest.coeffRef(j, i) = 0;
+                      }
+                  }),
+              UNWRAP(
+                  TMat<T> res(A.rows(), A.cols()); res.setZero(); int n = G.rows();
+                  auto f = [n](int i, int j) -> int { return (2 * n - i + 1) * i / 2 + j - i; };
+                  for (int i = 0; i < n; ++i) {
+                      *(res.data() + f(i, i)) = G.coeff(i, i);
+                      for (int j = i + 1; j < n; ++j) {
+                          *(res.data() + f(i, j)) = G.coeff(i, j);
+                      }
+                  } return {res};),
+              , , , , ,
+              UNWRAP(assert((((operand->rows() == 1) || (operand->cols() == 1)) &&
+                             _s_size(operand->size()) == std::trunc(_s_size(operand->size()))) &&
+                            "Input should be a vector, and the size must be appropriate for lower "
+                            "part of a square matrix.");),
+              , , )
+// norm. D: dim, 0(all), 1(row, norm of each row, get a row vector ), 2(col)
+template <typename T = double> struct LpNormEvalGrad : EvalGradFunctionBase<T> {
+    int n; // Power
+    int D; // MatReduction
+    TArr<T> vabs, vabsn;
+    LpNormEvalGrad(int n, int D) : n(n), D(D){};
+    std::string get_name() const override { return "LpNormEvalGrad"; };
+    boost::json::object to_json() const override {
+        boost::json::object res;
+        res["name"] = "LpNormEvalGrad";
+        res["n"] = n;
+        res["D"] = D;
+        return res;
+    };
+    void eval(TMap<T> &dest, const std::vector<TMap<T>> &inputs) override {
+        const auto &X = inputs[0];
+        vabs = X.array().abs();
+        if (n < 50) [[likely]] {
+            vabsn = vabs.pow(n);
+            if (D == 0) {
+                // Row
+                dest = vabsn.rowwise().sum().pow(1.0 / n);
+            } else if (D == 1) {
+                dest = vabsn.colwise().sum().pow(1.0 / n);
+                // Col.
+            } else {
+                // All
+                dest.coeffRef(0, 0) = std::pow(vabsn.sum(), 1.0 / n);
+            }
+        } else {
+
+            // Infinity norm
+            if (D == 0) {
+                // Row
+                dest = vabs.rowwise().maxCoeff();
+            } else if (D == 1) {
+                dest = vabs.rowwise().maxCoeff();
+                // Col.
+            } else {
+                // All
+                dest.coeffRef(0, 0) = vabs.maxCoeff();
+            }
+        }
+    };
+    std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) {
+        const auto &arr = current->input_node(0)->val().array();
+        const auto &G = current->grad();
+        if (D == 0) {
+            if (n == 1) {
+                return {_broadcasting_mul(G, arr.unaryExpr(&sign<T>))};
+            } else if (n < 50) {
+                TMat<T> res(arr.rows(), arr.cols());
+                for (int i = 0; i < arr.rows(); ++i) {
+                    T tmp = current->val().coeff(i, 0) / vabsn.row(i).sum();
+                    res.row(i) = G.coeff(i, 0) * tmp * vabsn.row(i) / vabs.row(i) *
+                                 arr.row(i).unaryExpr(&sign<T>);
+                }
+                return {res};
+            } else {
+                TMat<T> res(arr.rows(), arr.cols());
+                res.setZero();
+                for (int i = 0; i < arr.rows(); ++i) {
+                    int k;
+                    vabs.row(i).maxCoeff(&k);
+                    res.coeffRef(i, k) = G.coeff(i, 0) * sign(arr.coeff(i, k));
+                }
+                return {res};
+            };
+        } else if (D == 1) {
+            if (n == 1) {
+                return {_broadcasting_mul(G, arr.unaryExpr(&sign<T>))};
+            } else if (n < 50) {
+                TMat<T> res(arr.rows(), arr.cols());
+                for (int j = 0; j < arr.cols(); ++j) {
+                    T tmp = current->val().coeff(0, j) / vabsn.col(j).sum();
+                    res.col(j) = G.coeff(0, j) * tmp * vabsn.col(j) / vabs.col(j) *
+                                 arr.col(j).unaryExpr(&sign<T>);
+                }
+                return {res};
+            } else {
+                TMat<T> res(arr.rows(), arr.cols());
+                res.setZero();
+                for (int j = 0; j < arr.cols(); ++j) {
+                    int k;
+                    vabs.col(j).maxCoeff(&k);
+                    res.coeffRef(k, j) = G.coeff(0, j) * sign(arr.coeff(k, j));
+                }
+                return {res};
+            };
+        } else {
+            // Reduction all.
+            if (n == 1) {
+                return {G.coeff(0, 0) * arr.unaryExpr(&sign<T>)};
+            } else if (n < 50) {
+                TArr<T> res = G.coeff(0, 0) * vabsn / vabs * arr.unaryExpr(&sign<T>) *
+                              (current->val().coeff(0, 0) / vabsn.sum());
+                return {res};
+            } else {
+                TMat<T> res(arr.rows(), arr.cols());
+                res.setZero();
+                int i, j;
+                vabs.maxCoeff(&i, &j);
+                res.coeffRef(i, j) = G.coeff(0, 0) * sign(arr.coeff(i, j));
+                return {res};
+            };
+        }
+    };
+};
+
+// D=2 for all.
+template <int n = 2, int D = -1, typename T = double> requires requires() { n > 0; }
+std::shared_ptr<Var<T>> lpnorm(const std::shared_ptr<Var<T>> &operand) {
+    std::vector<std::shared_ptr<Var<T>>> input_nodes{operand};
+    if constexpr (D == 0) {
+        return std::make_shared<Var<T>>(operand->rows(), 1, (operand->requires_grad()), input_nodes,
+                                        std::make_unique<LpNormEvalGrad<T>>(n, D));
+    } else if constexpr (D == 1) {
+        return std::make_shared<Var<T>>(1, operand->cols(), (operand->requires_grad()), input_nodes,
+                                        std::make_unique<LpNormEvalGrad<T>>(n, D));
+    } else {
+        return std::make_shared<Var<T>>(1, 1, (operand->requires_grad()), input_nodes,
+                                        std::make_unique<LpNormEvalGrad<T>>(n, D));
+    };
+};
+
+// trace
+template <typename T = double> struct TraceEvalGrad : EvalGradFunctionBase<T> {
+    std::string get_name() const override { return "TraceEvalGrad"; };
+    boost::json::object to_json() const override {
+        boost::json::object res;
+        res["name"] = "TraceEvalGrad";
+        return res;
+    };
+    void eval(TMap<T> &dest, const std::vector<TMap<T>> &inputs) override {
+        const auto &X = inputs[0];
+        dest.coeffRef(0, 0) = X.trace();
+    };
+    std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) {
+        const auto &X = current->input_node(0)->val();
+        const auto &G = current->grad();
+        return {G.coeff(0, 0) * TMat<T>::Identity(X.rows(), X.cols())};
+    };
+};
+template <typename T = double> std::shared_ptr<Var<T>> trace(const std::shared_ptr<Var<T>> &X) {
+    assert((X->cols() == X->rows()) && "A must be a square matrix for trace(X) operator.");
+    std::vector<std::shared_ptr<Var<T>>> input_nodes{X};
+    return std::make_shared<Var<T>>(1, 1, (X->requires_grad()), input_nodes,
+                                    std::make_unique<TraceEvalGrad<T>>());
+};
+
+template <typename T = double> struct Trace2EvalGrad : EvalGradFunctionBase<T> {
+    std::string get_name() const override { return "Trace2EvalGrad"; };
+    boost::json::object to_json() const override {
+        boost::json::object res;
+        res["name"] = "Trace2EvalGrad";
+        return res;
+    };
+    void eval(TMap<T> &dest, const std::vector<TMap<T>> &inputs) override {
+        const auto &X = inputs[0];
+        const auto &Y = inputs[1];
+        dest.coeffRef(0, 0) = 0;
+        for (int i = 0; i < X.rows(); ++i) {
+            dest.coeffRef(0, 0) += X.row(i).dot(Y.col(i));
+        }
+    };
+    std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) {
+        const auto &X = current->input_node(0)->val();
+        const auto &Y = current->input_node(1)->val();
+        const auto &G = current->grad();
+        return {G.coeff(0, 0) * Y.transpose(), G.coeff(0, 0) * X.transpose()};
+    };
+};
+template <typename T = double>
+std::shared_ptr<Var<T>> trace(const std::shared_ptr<Var<T>> &X, const std::shared_ptr<Var<T>> &Y) {
+    assert(((X->cols() == Y->rows()) && (X->rows() == Y->cols())) &&
+           "X*Y must be a valid matrix product for trace(X, Y) operator.");
+    std::vector<std::shared_ptr<Var<T>>> input_nodes{X, Y};
+    return std::make_shared<Var<T>>(1, 1, (X->requires_grad() || Y->requires_grad()), input_nodes,
+                                    std::make_unique<Trace2EvalGrad<T>>());
+};
+
+// diag. Always return a column vector.
+template <typename T = double> struct DiagEvalGrad : EvalGradFunctionBase<T> {
+    std::string get_name() const override { return "DiagEvalGrad"; };
+    boost::json::object to_json() const override {
+        boost::json::object res;
+        res["name"] = "DiagEvalGrad";
+        return res;
+    };
+    void eval(TMap<T> &dest, const std::vector<TMap<T>> &inputs) override {
+        const auto &X = inputs[0];
+        dest = X.diagonal();
+    };
+    std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) {
+        const auto &X = current->input_node(0)->val();
+        const auto &G = current->grad();
+        return {G.array() * TMat<T>::Identity(X.rows(), X.cols()).array()};
+    };
+};
+template <typename T = double> std::shared_ptr<Var<T>> diag(const std::shared_ptr<Var<T>> &X) {
+    assert((X->cols() == X->rows()) && "X must be a square matrix for trace(X) operator.");
+    std::vector<std::shared_ptr<Var<T>>> input_nodes{X};
+    return std::make_shared<Var<T>>(X->rows(), 1, (X->requires_grad()), input_nodes,
+                                    std::make_unique<DiagEvalGrad<T>>());
+};
+// diag(A, B): diag(A*B)
+template <typename T = double> struct Diag2EvalGrad : EvalGradFunctionBase<T> {
+    std::string get_name() const override { return "Diag2EvalGrad"; };
+    boost::json::object to_json() const override {
+        boost::json::object res;
+        res["name"] = "Diag2EvalGrad";
+        return res;
+    };
+    void eval(TMap<T> &dest, const std::vector<TMap<T>> &inputs) override {
+        const auto &X = inputs[0];
+        const auto &Y = inputs[1];
+        for (int i = 0; i < X.rows(); ++i) {
+            dest.coeffRef(i, 0) = X.row(i).dot(Y.col(i));
+        }
+    };
+    std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) {
+        const auto &X = current->input_node(0)->val();
+        const auto &Y = current->input_node(1)->val();
+        const auto &G = current->grad();
+        return {G.asDiagonal() * Y.transpose(), X.transpose() * G.asDiagonal()};
+    };
+};
+template <typename T = double>
+std::shared_ptr<Var<T>> diag(const std::shared_ptr<Var<T>> &X, const std::shared_ptr<Var<T>> &Y) {
+    assert(((X->cols() == Y->rows()) && (X->rows() == Y->cols())) &&
+           "X*Y must be a valid matrix product for diag(X, Y) operator.");
+    std::vector<std::shared_ptr<Var<T>>> input_nodes{X, Y};
+    return std::make_shared<Var<T>>(X->rows(), 1, (X->requires_grad() || Y->requires_grad()),
+                                    input_nodes, std::make_unique<Diag2EvalGrad<T>>());
+};
+
+template <typename T = double> struct SumEvalGrad : EvalGradFunctionBase<T> {
+    int D; // MatReduction
+    SumEvalGrad(int D) : D(D){};
+    std::string get_name() const override { return "SumEvalGrad"; };
+    boost::json::object to_json() const override {
+        boost::json::object res;
+        res["name"] = "SumEvalGrad";
+        res["D"] = D;
+        return res;
+    };
+    void eval(TMap<T> &dest, const std::vector<TMap<T>> &inputs) override {
+        const auto &X = inputs[0];
+        if (D == -1) {
+            dest.coeffRef(0, 0) = X.sum();
+        } else if (D == 0) {
+            dest = X.rowwise().sum();
+        } else if (D == 1) {
+            dest = X.colwise().sum();
+        } else {
+            throw std::range_error("Invalid dimension " + std::to_string(D) +
+                                   ". Allowed values are -1(all), 0(row-wise sum), 1(col).");
+        }
+    };
+    std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) {
+        const auto &arr = current->input_node(0)->val().array();
+        const auto &G = current->grad();
+        if (D == -1) {
+            return {G.coeff(0, 0) * TMat<T>::Ones(arr.rows(), arr.cols())};
+        } else if (D == 0) {
+            return {_broadcasting_mul(G, TMat<T>::Ones(arr.rows(), arr.cols()))};
+        } else if (D == 1) {
+            return {_broadcasting_mul(G, TMat<T>::Ones(arr.rows(), arr.cols()))};
+        } else {
+            throw std::range_error("Invalid dimension " + std::to_string(D) +
+                                   ". Allowed values are -1(all), 0(row-wise sum), 1(col).");
+        }
+    };
+};
+
+// D=2 for all.
+template <int D = -1, typename T = double>
+std::shared_ptr<Var<T>> sum(const std::shared_ptr<Var<T>> &operand) {
+    std::vector<std::shared_ptr<Var<T>>> input_nodes{operand};
+    if constexpr (D == 0) {
+        return std::make_shared<Var<T>>(operand->rows(), 1, (operand->requires_grad()), input_nodes,
+                                        std::make_unique<SumEvalGrad<T>>(D));
+    } else if constexpr (D == 1) {
+        return std::make_shared<Var<T>>(1, operand->cols(), (operand->requires_grad()), input_nodes,
+                                        std::make_unique<SumEvalGrad<T>>(D));
+    } else {
+        return std::make_shared<Var<T>>(1, 1, (operand->requires_grad()), input_nodes,
+                                        std::make_unique<SumEvalGrad<T>>(D));
+    };
+};
+
+}; // namespace DynAutoDiff
+
+#undef UNWRAP
+#undef BINARYARITHOP
+#undef UNARYFUNCTION
+#endif

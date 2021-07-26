@@ -1,0 +1,6 @@
+./test_arithmetic_operator
+./test_neural_network
+./test_matrix
+./test_normal
+./test_init_var
+./test_eigen_helper
