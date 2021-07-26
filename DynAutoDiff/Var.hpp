@@ -182,6 +182,8 @@ template <typename T = double> class Var : public std::enable_shared_from_this<s
     };
     ~Var() { release_memory(); };
 
+    void setRandom() { _val.setRandom(); };
+
     int rows() const { return _rows; };
     int cols() const { return _cols; };
     int size() const { return _size; };
@@ -288,9 +290,10 @@ template <typename T = double> class Var : public std::enable_shared_from_this<s
     };
     void backward(const TMat<T> &seed) {
         if (_requires_grad) {
-            if(_leaf)
+            if (_leaf)
                 _grad = _grad + seed;
-            else _grad=seed;
+            else
+                _grad = seed;
             if (_input_nodes.size() > 0) {
                 std::vector<TMat<T>> grads = fn->grad(this->shared_from_this());
                 for (int i = 0; i < _input_nodes.size(); ++i) {
@@ -347,6 +350,12 @@ std::shared_ptr<Var<T>> mat(std::initializer_list<T> v, int rows, int cols,
                             bool requires_grad = false) {
     auto res = std::make_shared<Var<T>>(rows, cols, requires_grad);
     *res = v;
+    return res;
+};
+template <std::floating_point T = double>
+std::shared_ptr<Var<T>> mat(TMat<T> &m, bool requires_grad = false) {
+    auto res = std::make_shared<Var<T>>(m.rows(), m.cols(), requires_grad);
+    *res = m;
     return res;
 };
 // p for parameter.
@@ -683,18 +692,17 @@ UNARYFUNCTION(tanh, Tanh, operand->rows(), operand->cols(), UNWRAP(dest = A.arra
               UNWRAP(return {Ga / A.array().cosh().pow(2)};), , , , , , , , , )
 UNARYFUNCTION(sigmoid, Sigmoid, operand->rows(), operand->cols(),
               UNWRAP(dest = 1.0 / (1 + (-A.array()).exp());),
-              UNWRAP(auto maexp = (-A.array()).exp();
-                     return {Ga * maexp / (1 + maexp).pow(2)};),
-              , , , , , , , , )
+              UNWRAP(auto maexp = (-A.array()).exp(); return {Ga * maexp / (1 + maexp).pow(2)};), ,
+              , , , , , , , )
 UNARYFUNCTION(relu, ReLU, operand->rows(), operand->cols(),
-              UNWRAP(dest = A.unaryExpr([](T x) { return x > 0 ? x : 0; });),
-              UNWRAP(return {Ga * A.unaryExpr([](T x) { return x > 0 ? 1 : 0; })};), , , , , , , ,
+              UNWRAP(dest = A.unaryExpr([](T x)->T { return x > 0 ? x : 0; });),
+              UNWRAP(return {Ga * A.unaryExpr([](T x)->T { return x > 0 ? 1 : 0; }).eval().array()};), , , , , , , ,
               , )
 UNARYFUNCTION(sqrt, Sqrt, operand->rows(), operand->cols(), UNWRAP(dest = A.array().sqrt();),
               UNWRAP(return {0.5 * Ga * current->val().array() / A.array()};), , , , , , , , , )
 UNARYFUNCTION(pow, Pow, operand->rows(), operand->cols(), UNWRAP(dest = A.array().pow(n);),
-              UNWRAP(return {Ga * n * current->val().array()/A.array()};), UNWRAP(int n;), UNWRAP(, int n), n, ,
-              , , int n,
+              UNWRAP(return {Ga * n * current->val().array() / A.array()};), UNWRAP(int n;),
+              UNWRAP(, int n), n, , , , int n,
               UNWRAP(
                   : n(n)),
               UNWRAP(res["n"] = n;))
@@ -710,7 +718,9 @@ UNARYFUNCTION(rsdot, RSdot, operand->cols(), operand->cols(), UNWRAP(dest = A.tr
               UNWRAP(return {2 * A * G};), , , , , , , , , )
 // det
 UNARYFUNCTION(det, Det, 1, 1, UNWRAP(dest.coeffRef(0, 0) = A.determinant();),
-              UNWRAP(return {G.coeff(0, 0) * current->val().coeff(0,0) * A.inverse().transpose()};), , , , , ,
+              UNWRAP(return {G.coeff(0, 0) * current->val().coeff(0, 0) *
+                             A.inverse().transpose()};),
+              , , , , ,
               UNWRAP(assert((operand->rows() == operand->cols()) &&
                             "Input should be a square matrix for det.");),
               , , )

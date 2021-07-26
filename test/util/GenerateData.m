@@ -7,4 +7,4 @@ writematrix(X,"../X.txt", "Delimiter"," ");
 writematrix(y,"../y.txt", "Delimiter"," ");
 
 %%
-%Logistic regression.
+% Neuralnetwork regression.

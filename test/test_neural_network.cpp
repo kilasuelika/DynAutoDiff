@@ -1,4 +1,4 @@
-#include "../DynAutoDiff/Var.hpp"
+#include "../DynAutoDiff/DynAutoDiff.hpp"
 #include <algorithm>
 #include <boost/test/tools/old/interface.hpp>
 #include <eigen3/Eigen/Core>

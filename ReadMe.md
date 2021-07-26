@@ -45,9 +45,9 @@ cmake .
 make
 ```
 
-The main part of this library is a header-only library and depend on `Eigen, boost.json, ` which are also header-only libraries. So just copy the header files folder `DynAutoDiff` into your projects. You compiler should support **c++20** (`constexpr, <concepts>, <numbers> ...` are used).
+The main part of this library is a header-only library and depend on `Eigen, boost.json, boost.math` which are also header-only libraries. So just copy the header files folder `DynAutoDiff` into your projects. You compiler should support **c++20** (`constexpr, <concepts>, <numbers> ...` are used).
 
-There are also a series wrapper classes for `ceres` (CeresOptimizer.hpp), `NLopt` (nloptoptimizer.hpp). They are not included in `DynAutoDiff.hpp`. To use these, you need to install them by yourselves.
+There are also a series of wrapper classes for `ceres` (CeresOptimizer.hpp), `NLopt` (nloptoptimizer.hpp). They are not included in `DynAutoDiff.hpp`. To use these, you need to install them by yourselves.
 
 If you want to run tests, then you need `boost`.
 
@@ -80,7 +80,7 @@ int main() {
 
 ### Linear Regression Models
 
-See `examples/ceres_linear_regression`:
+Compare OLS regression and MLE regression. You need ceres. See `examples/ceres_linear_regression`:
 
 ```cpp
 #include "../../DynAutoDiff/CeresOptimizer.hpp"
@@ -92,26 +92,26 @@ int main() {
     auto X = std::make_shared<Var<>>("../../test/X.txt");
     auto y = std::make_shared<Var<>>("../../test/y.txt");
 
-	//Set parameters.
-    auto theta_ols=pvec(X->cols());
-	auto theta_mle=pvec(X->cols());
+    // Set parameters.
+    auto theta_ols = pvec(X->cols());
+    auto theta_mle = pvec(X->cols());
     auto c_ols = psca();
-	auto c_mle=psca();
+    auto c_mle = psca();
 
-	// Losses.
-    auto mse=mse_loss(X*theta_ols+c_ols, y);
-	auto ll=-ln_normal_den(y-X*theta_mle-c_mle, csca(0.0), psca(1.0));
+    // Losses.
+    auto mse = mse_loss(X * theta_ols + c_ols, y);
+    auto ll = -ln_normal_den(y - X * theta_mle - c_mle, csca(0.0), psca(1.0));
 
     CeresOptimizer ols_opt(mse);
     ols_opt.run();
-	CeresOptimizer mle_opt(ll);
-	mle_opt.run();
+    CeresOptimizer mle_opt(ll);
+    mle_opt.run();
 
-    cout << "OLS theta: "<<endl << theta_ols->val() << endl;
-    cout << "OLS c: "<<endl << c_ols->val() << endl;
+    cout << "OLS theta: " << endl << theta_ols->val() << endl;
+    cout << "OLS c: " << endl << c_ols->val() << endl;
 
-	cout << "MLE theta: "<<endl << theta_mle->val() << endl;
-    cout << "MLE c: "<<endl << c_mle->val() << endl;
+    cout << "MLE theta: " << endl << theta_mle->val() << endl;
+    cout << "MLE c: " << endl << c_mle->val() << endl;
 }
 ```
 
@@ -119,7 +119,7 @@ One would find that the result will be the same (except negligible numerical err
 
 ### GMM Model
 
-The full code is in `examples/ceres_GMM`. The dataset has 10 columns. Assuming the data comes from two Gaussian distributions, the following code computes negative log-likelihood:
+The full code is in `examples/ceres_GMM`. The dataset has 10 columns and 5000 samples. Assuming the data comes from two Gaussian distributions, the following code computes negative log-likelihood:
 
 ```cpp
 auto X = std::make_shared<Var<>>("../../test/gmm_datat5000_10.txt");
@@ -151,20 +151,21 @@ GraphManager<> gm(ll);
 
 ### Conventions and Be Careful
 
-1. `Eigen` uses `ColumnMajor` by default. But it's a little counter-intuitive. So `RowMajor` is used by this library. The internal type used is:
+1. This library only implements *reverse mode* automatic differential.
+2. `Eigen` uses `ColumnMajor` by default. But it's a little counter-intuitive. So `RowMajor` is used by this library. The internal type used is:
 ```cpp
 template <typename T = double>
 using TMat = Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
 ```
-2. When I say *vector*, it's default to be a column vector. Use column vectors as much as possibles to avoid confusing.
-3. The default template element type are `double`, but sometime you need to explicitly specify it:
+3. When I say *vector*, it's default to be a column vector. Use column vectors as much as possibles to avoid confusing.
+4. The default template element type are `double`, but sometime you need to explicitly specify it:
 ```cpp
 auto x=rowvec({1,2,3}) // Warning: element will be int
 auto x=rowvec<double>({1,2,3})  //Correct.
 ```
-1. The initial values and gradients are guaranteed to be 0 for automatically allocated memory. Sometimes this may be problematic. For example, when optimizing, the target function may be undefined for 0 inputs. You must provide initial values at this situation.
-2. The default reduction method for loss functions is **Sum**, not mean.
-3. There will be range checks for `v(), g()` which are used to get value and gradient by index.
+5. The initial values and gradients are guaranteed to be 0 for automatically allocated memory. Sometimes this may be problematic. For example, when optimizing, the target function may be undefined for 0 inputs. You must provide initial values at this situation.
+6. The default reduction method for loss functions is **Sum**, not mean.
+7. There will be range checks for `v(), g()` which are used to get value and gradient by index.
 
 ### Initializing Variables
 
@@ -223,10 +224,9 @@ can create a variable with values read from "data.txt". It should be a tab-delim
 2. `transpose(X)`: matrix transpose $X^T$.
 3. `trace(X)`: trace of a matrix. `trace(X, Y)`: trace of $XY$.
 4. `det(X), logdet(X)`: determinant and natural log determinant.
-5. 
-6. `lsdot(X)`: left-self-dot $XX^T$. `rsdot(X)`: right-self-dot $X^TX$. They can be used to construct a semi-positive definitive matrix.
-7. `diag(X)`: extract diagonal elements to form a column vector. `diag(X, Y)`: $\text{diag}(XY)$. `diagonal(v)`: construct a diagonal matrix by a vector (both column and row).
-8. `vec(X)`: stack columns to form a column vector. `vech(X)`: stack columns of lower part to form a column vector. $X$ must be a square matrix. `ivech(v)`: unstack a vector to form a symmetric matrix. For example, if *v* has size 6, then the result will be a $2\times 2$ symmetric matrix ($\frac{(1+3)\times 3}{2}=6$).
+5. `lsdot(X)`: left-self-dot $XX^T$. `rsdot(X)`: right-self-dot $X^TX$. They can be used to construct a semi-positive definitive matrix.
+6. `diag(X)`: extract diagonal elements to form a column vector. `diag(X, Y)`: $\text{diag}(XY)$. `diagonal(v)`: construct a diagonal matrix by a vector (both column and row).
+7. `vec(X)`: stack columns to form a column vector. `vech(X)`: stack columns of lower part to form a column vector. $X$ must be a square matrix. `ivech(v)`: unstack a vector to form a symmetric matrix. For example, if *v* has size 6, then the result will be a $2\times 2$ symmetric matrix ($\frac{(1+3)\times 3}{2}=6$).
 This is usefull when you want to optimize a symmetric matrix.
 $$
 [1,2,3,4,5,6]\implies \begin{bmatrix}
@@ -246,13 +246,12 @@ $$
 3 & 5 & 6
 \end{bmatrix}
 \text{ivecu(v)}: [1,2,3,4,5,6]\implies \begin{bmatrix}
-1 & 2 & 3  \\
-0 & 4 & 5\\
+1 & 2 & 3 \\
+0 & 4 & 5 \\
 0 & 0 & 6
 \end{bmatrix}
 $$
 
-f
 #### Distributions
 
 Only computes **log density**. For example,

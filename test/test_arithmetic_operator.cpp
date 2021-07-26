@@ -255,4 +255,15 @@ BOOST_AUTO_TEST_CASE(sqrt_test) {
     BOOST_CHECK_EQUAL(y2->val().coeff(0, 0), 0.5);
     BOOST_CHECK_CLOSE(x1->g(), -0.25, 1e-5);
 }
+
+BOOST_AUTO_TEST_CASE(relu_test) {
+    auto m=pmat<double>({-2,-1,1,2},2,2);
+	auto y=relu(m);
+    GraphManager<> m1(y);
+    m1.run();
+    BOOST_CHECK_EQUAL(y->v(), 0);
+    BOOST_CHECK_CLOSE(y->v(1,0),1, 1e-5);
+	BOOST_CHECK_CLOSE(m->g(),0, 1e-5);
+	BOOST_CHECK_CLOSE(m->g(1,1),1, 1e-5);
+}
 BOOST_AUTO_TEST_SUITE_END()

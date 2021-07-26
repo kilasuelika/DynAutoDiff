@@ -96,7 +96,7 @@ template <typename T = double> struct BCELossEvalGrad : EvalGradFunctionBase<T> 
 
 template <typename T = double> struct MSELossEvalGrad : EvalGradFunctionBase<T> {
     int N = 0, R;
-    MSELossEvalGrad(int Reduction) : R(Reduction){};
+    MSELossEvalGrad(int R) : R(R){};
     // BCELossEvalGrad(int N) : N(N){};
     std::string get_name() const override { return "MSELossEvalGrad"; };
     boost::json::object to_json() const override {
@@ -108,12 +108,13 @@ template <typename T = double> struct MSELossEvalGrad : EvalGradFunctionBase<T> 
     void eval(TMap<T> &dest, const std::vector<TMap<T>> &inputs) override {
         const auto &input = inputs[0];
         const auto &target = inputs[1];
-        N = input.rows();
+        N = input.size();
         if (R == Reduction::None) {
             dest = (input.array() - target.array()).pow(2);
-        } else if (R == Reduction::Sum) {
+        } else {
             dest.coeffRef(0, 0) = (input.array() - target.array()).pow(2).sum();
             if (R == Reduction::Mean) {
+                //std::cout<<"Mean"<<std::endl;
                 dest = dest / N;
             }
         }
@@ -150,7 +151,7 @@ template <typename T = double> struct MSELossEvalGrad : EvalGradFunctionBase<T> 
 };
 
 #define LOSSFUNCTIONTEMPLATE(functionname, structname, assertstmt)                                 \
-    template <typename T = double, Reduction R = Sum>                                              \
+    template <Reduction R = Sum,typename T = double>                                              \
     std::shared_ptr<Var<T>> functionname(std::shared_ptr<Var<T>> input,                            \
                                          std::shared_ptr<Var<T>> target) {                         \
         assertstmt std::vector<std::shared_ptr<Var<T>>> input_nodes{input, target};                \
