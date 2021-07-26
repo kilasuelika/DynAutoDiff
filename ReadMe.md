@@ -1,4 +1,5 @@
 # DynAutoDiff - A C++ 20 Header-Only Dynamic Automatic Differential Library for Statistics and ML
+[![purple-pi](https://img.shields.io/badge/Rendered%20with-Purple%20Pi-bd00ff?style=flat-square)](https://github.com/nschloe/purple-pi?activate)
 
 ![Introduction](Main.png)
 
