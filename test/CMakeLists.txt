@@ -6,10 +6,7 @@ project(main)
 set(CMAKE_C_COMPILER /usr/bin/gcc CACHE PATH "" FORCE)
 set(CMAKE_CXX_COMPILER /usr/bin/g++ CACHE PATH "" FORCE)
 
-include_directories("/usr/local/include")
-#eigen3
-find_package(Eigen3)
-include_directories(EIGEN3_INCLUDE_DIR)
+#include_directories("/usr/local/include")
 
 #ceres
 find_package(Ceres REQUIRED)

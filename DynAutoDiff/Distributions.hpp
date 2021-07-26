@@ -147,7 +147,7 @@ template <typename T = double> struct LnMVNormalDenEvalGrad : EvalGradFunctionBa
 };
 
 template <typename T = double> struct LnNormalDenEvalGrad : EvalGradFunctionBase<T> {
-    TMat<T> Xmu;
+    TMat<T> Xmu, Xmu2;
     int N;
     int R;
     LnNormalDenEvalGrad(int R) : R(R){};
@@ -165,15 +165,15 @@ template <typename T = double> struct LnNormalDenEvalGrad : EvalGradFunctionBase
         const auto &X = inputs[0];
 
         TMat<T> res(N, 1);
-
-        res = (X.array() - mu).pow(2);
+        Xmu = X.array() - mu;
+        Xmu2 = Xmu.array().pow(2);
 
         if (R == Reduction::None) {
             dest = -0.5 * std::log(2 * std::numbers::pi) - std::log(sigma) -
-                   0.5 * res.array() / (sigma * sigma);
+                   0.5 * Xmu2.array() / (sigma * sigma);
         } else {
             dest.coeffRef(0, 0) = -0.5 * N * std::log(2 * std::numbers::pi) - N * std::log(sigma) -
-                                  0.5 * res.sum() / (sigma * sigma);
+                                  0.5 * Xmu2.sum() / (sigma * sigma);
             if (R == Reduction::Mean) {
                 dest = dest.array() / N;
             }
@@ -190,9 +190,9 @@ template <typename T = double> struct LnNormalDenEvalGrad : EvalGradFunctionBase
         if (current->input_node(0)->requires_grad()) {
             TMat<T> Xg(N, 1);
             if (R == Reduction::None) {
-                Xg = -(X.array() - mu) / (sigma * sigma) * current->grad().array();
+                Xg = -Xmu.array() / (sigma * sigma) * current->grad().array();
             } else {
-                Xg = -(X.array() - mu) / (sigma * sigma) * current->grad().coeff(0, 0);
+                Xg = -Xmu.array() / (sigma * sigma) * current->grad().coeff(0, 0);
 
                 if (R == Reduction::Mean) {
                     Xg = Xg / N;
@@ -211,11 +211,9 @@ template <typename T = double> struct LnNormalDenEvalGrad : EvalGradFunctionBase
                 mug.coeffRef(0, 0) = -res[0].sum();
             } else {
                 if (R == Reduction::None) {
-                    mug.coeffRef(0, 0) =
-                        ((X.array() - mu) * current->grad().array()).sum() / (sigma * sigma);
+                    mug.coeffRef(0, 0) = (Xmu.array() * current->grad().array()).sum() / (sigma * sigma);
                 } else {
-                    mug.coeffRef(0, 0) =
-                        ((X.array() - mu)).sum() / (sigma * sigma) * current->grad().coeff(0, 0);
+                    mug.coeffRef(0, 0) = Xmu.sum() / (sigma * sigma) * current->grad().coeff(0, 0);
                     if (R == Reduction::Mean) {
                         mug = mug / N;
                     }
@@ -231,13 +229,10 @@ template <typename T = double> struct LnNormalDenEvalGrad : EvalGradFunctionBase
 
             if (R == Reduction::None) {
                 sg.coeffRef(0, 0) =
-                    ((-1.0 / sigma + (X.array() - mu).pow(2) / (std::pow(sigma, 3))) *
-                     current->grad().array())
-                        .sum();
+                    ((-1.0 / sigma + Xmu2.array() / (std::pow(sigma, 3))) * current->grad().array()).sum();
             } else {
-                sg.coeffRef(0, 0) =
-                    (-N / sigma + ((X.array() - mu).pow(2).sum()) / (std::pow(sigma, 3))) *
-                    current->grad().coeff(0, 0);
+                sg.coeffRef(0, 0) = (-N / sigma + Xmu2.sum() / (std::pow(sigma, 3))) *
+                                    current->grad().coeff(0, 0);
                 if (R == Reduction::Mean) {
                     sg = sg / N;
                 }

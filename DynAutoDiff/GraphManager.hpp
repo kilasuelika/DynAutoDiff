@@ -307,7 +307,7 @@ template <typename T = double> class GraphManager {
         _v_allocated = true;
         _g_allocated = true;
 		
-		return std::make_pair(TMatp<T>(_val.data(), _nparm, 1), TMatp<T>(_grad.data(), _nparm, 1));
+		return std::make_pair(TMap<T>(_val.data(), _nparm, 1), TMap<T>(_grad.data(), _nparm, 1));
     }
     //
     void zero_all(bool clear_leaf = true) {

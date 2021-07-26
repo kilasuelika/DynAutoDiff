@@ -78,6 +78,45 @@ int main() {
 };
 ```
 
+### Linear Regression Models
+
+See `examples/ceres_linear_regression`:
+
+```cpp
+#include "../../DynAutoDiff/CeresOptimizer.hpp"
+
+using namespace std;
+using namespace DynAutoDiff;
+
+int main() {
+    auto X = std::make_shared<Var<>>("../../test/X.txt");
+    auto y = std::make_shared<Var<>>("../../test/y.txt");
+
+	//Set parameters.
+    auto theta_ols=pvec(X->cols());
+	auto theta_mle=pvec(X->cols());
+    auto c_ols = psca();
+	auto c_mle=psca();
+
+	// Losses.
+    auto mse=mse_loss(X*theta_ols+c_ols, y);
+	auto ll=-ln_normal_den(y-X*theta_mle-c_mle, csca(0.0), psca(1.0));
+
+    CeresOptimizer ols_opt(mse);
+    ols_opt.run();
+	CeresOptimizer mle_opt(ll);
+	mle_opt.run();
+
+    cout << "OLS theta: "<<endl << theta_ols->val() << endl;
+    cout << "OLS c: "<<endl << c_ols->val() << endl;
+
+	cout << "MLE theta: "<<endl << theta_mle->val() << endl;
+    cout << "MLE c: "<<endl << c_mle->val() << endl;
+}
+```
+
+One would find that the result will be the same (except negligible numerical error).
+
 ### GMM Model
 
 The full code is in `examples/ceres_GMM`. The dataset has 10 columns. Assuming the data comes from two Gaussian distributions, the following code computes negative log-likelihood:
@@ -107,10 +146,6 @@ auto p2v = (1.0 / sqrt(pow(2 * numbers::pi, 10))) / sqrt(det(S2)) *
 auto ll = -sum(ln(p * p1v + (1 - p) * p2v));
 GraphManager<> gm(ll);
 ```
-
-
-### Using Distributions and Loss Functions
-
 
 ## Reference Guide
 
