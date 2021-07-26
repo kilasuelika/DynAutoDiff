@@ -35,7 +35,7 @@ There is a `GraphManager` that helps manage a graph. For example it can track al
 
 First clone this project:
 ```
-git clone 
+git clone https://github.com/kilasuelika/DynAutoDiff.git
 ```
 
 Then run the hello world example (see bellow):
@@ -44,7 +44,9 @@ cmake .
 make
 ```
 
-This library is a pure template library and depend on `Eigen` which is also a template library. So just copy the header files (**eigen3** and **DynAutoDiff** folders. If you have installed `Eigen`, then *eigen3* is not needed). You compiler should support **c++20** (`constexpr, <concepts>, <numbers> ...` are used).
+The main part of this library is a header-only library and depend on `Eigen, boost.json, ` which are also header-only libraries. So just copy the header files folder `DynAutoDiff` into your projects. You compiler should support **c++20** (`constexpr, <concepts>, <numbers> ...` are used).
+
+There are also a series wrapper classes for `ceres` (CeresOptimizer.hpp), `NLopt` (nloptoptimizer.hpp). They are not included in `DynAutoDiff.hpp`. To use these, you need to install them by yourselves.
 
 If you want to run tests, then you need `boost`.
 
@@ -80,12 +82,43 @@ auto x=rowvec<double>({1,2,3})  //Correct.
 
 #### Automatic memory management
 
+There are a series of convinence functions for creating specific size variables: `mat, vec, rowvec, sca`. Each one has a c-version (constant, thus `requires_grad=false`) and p-version  (parameter, thus `requires_grad=true`).
+
+1. Only specify size, allo values are initialized to be 0s:
+
+```cpp
+auto S=cmat(2,2); //2*2 size matrix
+auto S=pmat(2,2); //2*2 size parameter matrix
+auto v=vec(5); //column vector
+auto s=csca(); // scalar.
+```
+2. Pass data when crating a variable:
+
+```cpp
+auto S=cmat<double>({1,2,3,1}, 2, 2); //Don't forget to set variable type to double.
+auto S=cmat({1.1, 2.0, 3.0, 3.9}, 2, 2); //double type.
+auto v=vec<double>({1,2,3}); //No need to set size for vector. 3*1 vector.
+```
 
 #### Passing External Storage
 
+You can pass data pointers when initilizing:
+```cpp
+auto S=std::make_shared<Var<T=double>>(T* val, T* gard, rows, cols);
+```
+
+Or you can `bind` later:
+
+```cpp
+auto S=cmat(2,2);
+S->bind(T* val, T* grad, rows, cols);
+```
 
 #### Reading Data from File
-
+```
+auto x=std::make_shared<Var<>>("data.txt", requires_grad=false);
+```
+can create a variable with values read from "data.txt". It should be a tab-delimited file without header row, not csv format. Shape is automatically decided. 
 
 ### Expressions and Operators
 
@@ -166,3 +199,37 @@ auto loss = binary_cross_entropy(sigmoid(X * theta + c), y); //Logistic regressi
 
 ### Evaluation and Backward
 
+To carry out a fresh computation, use
+
+```cpp
+GraphManager<> gm(y); //y is a variable.
+gm.run(clear_leaf_grad=true);
+```
+
+It's equivalent to:
+
+```cpp
+zero_all(clear_leaf_grad); // Clear all gradient.
+_root->eval();
+_root->backward();
+```
+
+If `clear_leaf_grad=true`, then it will also clear gradient of leaf nodes  (parameters).
+
+Sometimes you want to loop over samples and accumualate gradients on leaf nodes. Then just use
+
+```
+gm.run(false);
+```
+
+### GraphManager
+
+#### Reallocate Contiguous Memory
+
+Sometimes you want the memory of parameter nodes to be contiguous. Then you can use:
+
+```cpp
+auto [val, grad]& = gm.auto_bind_parm();
+```
+
+Here `val, grad` both are column vectors with type `TMap<T>`. 

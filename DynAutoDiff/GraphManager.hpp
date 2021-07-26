@@ -300,12 +300,14 @@ template <typename T = double> class GraphManager {
         }
     }
     // Allocate val and grad in continguous memory.
-    void auto_bind_parm() {
+    std::pair<TMap<T>, TMap<T>> auto_bind_parm() {
         _val.resize(_nparm);
         _grad.resize(_nparm);
         bind(_val.data(), _grad.data());
         _v_allocated = true;
         _g_allocated = true;
+		
+		return std::make_pair(TMatp<T>(_val.data(), _nparm, 1), TMatp<T>(_grad.data(), _nparm, 1));
     }
     //
     void zero_all(bool clear_leaf = true) {
