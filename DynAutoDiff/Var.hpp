@@ -10,6 +10,7 @@
 #include <iostream>
 #include <memory>
 #include <queue>
+#include <random>
 #include <stack>
 #include <stdexcept>
 #include <utility>
@@ -58,6 +59,7 @@ template <typename T = double> class Var : public std::enable_shared_from_this<s
 
   private:
     template <typename T1> friend class GraphManager;
+    template <typename T1> friend struct NaiveGD;
 
     TMap<T> _val, _grad;
     int _rows = 0;
@@ -183,6 +185,15 @@ template <typename T = double> class Var : public std::enable_shared_from_this<s
     ~Var() { release_memory(); };
 
     void setRandom() { _val.setRandom(); };
+    void setRandomNormal(int seed = -1) {
+        if (seed == -1) {
+            std::random_device rd;
+            seed = rd();
+        };
+        std::default_random_engine eng(seed);
+        std::normal_distribution dist(T(0.0), T(1.0));
+        std::for_each(this->vbegin(), this->vend(), [&eng, &dist](T &x) mutable { x = dist(eng); });
+    };
 
     int rows() const { return _rows; };
     int cols() const { return _cols; };
@@ -353,7 +364,7 @@ std::shared_ptr<Var<T>> mat(std::initializer_list<T> v, int rows, int cols,
     return res;
 };
 template <std::floating_point T = double>
-std::shared_ptr<Var<T>> mat(TMat<T> &m, bool requires_grad = false) {
+std::shared_ptr<Var<T>> mat(const TMat<T> &m, bool requires_grad = false) {
     auto res = std::make_shared<Var<T>>(m.rows(), m.cols(), requires_grad);
     *res = m;
     return res;
@@ -533,15 +544,16 @@ BINARYARITHOP(
     UNWRAP(-current->grad()), shape_match(lhs, rhs) || (lhs->size() == 1) || (rhs->size() == 1),
     "Mat shape must be equal for - operator or at least one of them is actually a scalar.")
 // times: matrix product.
-BINARYARITHOP(*, Times, inputs[0] * inputs[1],
-              UNWRAP(_matmul_result_rows(lhs->rows(), lhs->cols(), rhs->rows(), rhs->cols())),
-              UNWRAP(_matmul_result_cols(lhs->rows(), lhs->cols(), rhs->rows(), rhs->cols())),
-              UNWRAP(eigen_scalar_mat(T((G.array() * R.array()).sum()))), UNWRAP(G *L.coeff(0, 0)),
-              UNWRAP(G *R.coeff(0, 0)), UNWRAP(eigen_scalar_mat(T((G.array() * L.array()).sum()))),
-              UNWRAP(G *R.transpose()), UNWRAP(L.transpose() * G),
-              (lhs->cols() == rhs->rows()) || (lhs->size() == 1) || (rhs->size() == 1),
-              "Cols of left matrix should be equal to rows of the right matrix for matrix "
-              "multiplication operator * or at least one of them is actually a scalar.")
+BINARYARITHOP(
+        *, Times, inputs[0] * inputs[1],
+        UNWRAP(_matmul_result_rows(lhs->rows(), lhs->cols(), rhs->rows(), rhs->cols())),
+        UNWRAP(_matmul_result_cols(lhs->rows(), lhs->cols(), rhs->rows(), rhs->cols())),
+        UNWRAP(eigen_scalar_mat(T((G.array() * R.array()).sum()))), UNWRAP(G *L.coeff(0, 0)),
+        UNWRAP(G *R.coeff(0, 0)), UNWRAP(eigen_scalar_mat(T((G.array() * L.array()).sum()))),
+        UNWRAP(G *R.transpose()), UNWRAP(L.transpose() * G),
+        (lhs->cols() == rhs->rows()) || (lhs->size() == 1) || (rhs->size() == 1),
+        UNWRAP("Cols of left matrix should be equal to rows of the right matrix for matrix "
+         "multiplication operator * or at least one of them is actually a scalar. Shapes are: "))
 // division
 BINARYARITHOP(
     /, Division, inputs[0].array() + inputs[1].array(), UNWRAP(std::max(lhs->rows(), rhs->rows())),
@@ -653,7 +665,7 @@ std::shared_ptr<Var<T>> offset(const std::shared_ptr<Var<T>> &X, const std::shar
         std::string get_name() const override { return STRING(structname##EvalGrad); };            \
         boost::json::object to_json() const override {                                             \
             boost::json::object res;                                                               \
-            res["name"] = STRING(functionname);                                                    \
+            res["name"] = STRING(structname##EvalGrad);                                            \
             to_json_exp return res;                                                                \
         };                                                                                         \
         datamember structname##EvalGrad(constructorarg) constructorinit{};                         \
@@ -695,9 +707,10 @@ UNARYFUNCTION(sigmoid, Sigmoid, operand->rows(), operand->cols(),
               UNWRAP(auto maexp = (-A.array()).exp(); return {Ga * maexp / (1 + maexp).pow(2)};), ,
               , , , , , , , )
 UNARYFUNCTION(relu, ReLU, operand->rows(), operand->cols(),
-              UNWRAP(dest = A.unaryExpr([](T x)->T { return x > 0 ? x : 0; });),
-              UNWRAP(return {Ga * A.unaryExpr([](T x)->T { return x > 0 ? 1 : 0; }).eval().array()};), , , , , , , ,
-              , )
+              UNWRAP(dest = A.unaryExpr([](T x) -> T { return x > 0 ? x : 0; });),
+              UNWRAP(return {Ga *
+                             A.unaryExpr([](T x) -> T { return x > 0 ? 1 : 0; }).eval().array()};),
+              , , , , , , , , )
 UNARYFUNCTION(sqrt, Sqrt, operand->rows(), operand->cols(), UNWRAP(dest = A.array().sqrt();),
               UNWRAP(return {0.5 * Ga * current->val().array() / A.array()};), , , , , , , , , )
 UNARYFUNCTION(pow, Pow, operand->rows(), operand->cols(), UNWRAP(dest = A.array().pow(n);),

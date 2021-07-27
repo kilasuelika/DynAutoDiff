@@ -4,4 +4,5 @@
 #include "GraphManager.hpp"
 #include "Losses.hpp"
 #include "Var.hpp"
+#include "GDOptimizer.hpp"
 #endif

@@ -1,0 +1,223 @@
+(* Content-type: application/vnd.wolfram.mathematica *)
+
+(*** Wolfram Notebook File ***)
+(* http://www.wolfram.com/nb *)
+
+(* CreatedBy='Mathematica 12.3' *)
+
+(*CacheID: 234*)
+(* Internal cache information:
+NotebookFileLineBreakTest
+NotebookFileLineBreakTest
+NotebookDataPosition[       158,          7]
+NotebookDataLength[      7641,        215]
+NotebookOptionsPosition[      6360,        189]
+NotebookOutlinePosition[      6796,        206]
+CellTagsIndexPosition[      6753,        203]
+WindowFrame->Normal*)
+
+(* Beginning of Notebook Content *)
+Notebook[{
+
+Cell[CellGroupData[{
+Cell[BoxData[{
+ RowBox[{
+  RowBox[{"SetDirectory", "[", 
+   RowBox[{"NotebookDirectory", "[", "]"}], "]"}], 
+  ";"}], "\[IndentingNewLine]", 
+ RowBox[{
+  RowBox[{"data", "=", 
+   RowBox[{"Import", "[", "\"\<data.csv\>\"", "]"}]}], 
+  ";"}], "\[IndentingNewLine]", 
+ RowBox[{
+  RowBox[{"N", "=", 
+   RowBox[{"Length", "[", "data", "]"}]}], ";"}], "\[IndentingNewLine]", 
+ RowBox[{
+  RowBox[{"k", "=", 
+   RowBox[{"Length", "[", 
+    RowBox[{"data", "[", 
+     RowBox[{"[", "1", "]"}], "]"}], "]"}]}], ";"}], "\[IndentingNewLine]", 
+ RowBox[{
+  RowBox[{"trainX", "=", 
+   RowBox[{"data", "[", 
+    RowBox[{"[", 
+     RowBox[{
+      RowBox[{"1", ";;", "2200"}], ",", 
+      RowBox[{"1", ";;", 
+       RowBox[{"(", 
+        RowBox[{"k", "-", "1"}], ")"}]}]}], "]"}], "]"}]}], 
+  ";"}], "\[IndentingNewLine]", 
+ RowBox[{
+  RowBox[{"trainy", "=", 
+   RowBox[{"data", "[", 
+    RowBox[{"[", 
+     RowBox[{
+      RowBox[{"1", ";;", "2200"}], ",", "k"}], "]"}], "]"}]}], 
+  ";"}], "\[IndentingNewLine]", 
+ RowBox[{
+  RowBox[{"testX", "=", 
+   RowBox[{"data", "[", 
+    RowBox[{"[", 
+     RowBox[{
+      RowBox[{"2201", ";;", "N"}], ",", 
+      RowBox[{"1", ";;", 
+       RowBox[{"(", 
+        RowBox[{"k", "-", "1"}], ")"}]}]}], "]"}], "]"}]}], 
+  ";"}], "\[IndentingNewLine]", 
+ RowBox[{
+  RowBox[{"testy", "=", 
+   RowBox[{"data", "[", 
+    RowBox[{"[", 
+     RowBox[{
+      RowBox[{"2201", ";;", "N"}], ",", "k"}], "]"}], "]"}]}], 
+  ";"}], "\[IndentingNewLine]", 
+ RowBox[{"net", "=", 
+  RowBox[{"NetChain", "[", 
+   RowBox[{
+    RowBox[{"LinearLayer", "[", "20", "]"}], ",", "Ramp", ",", 
+    RowBox[{"LinearLayer", "[", "50", "]"}], ",", "Ramp", ",", 
+    RowBox[{"LinearLayer", "[", "2", "]"}], ",", "Ramp", ",", 
+    RowBox[{"LinearLayer", "[", "1", "]"}], ",", 
+    RowBox[{"\"\<input\>\"", "->", 
+     RowBox[{"k", "-", "1"}]}]}], "]"}]}]}], "Input",
+ CellChangeTimes->{{3.836358694311129*^9, 3.8363588071299567`*^9}, {
+  3.8363588437428017`*^9, 3.836358992373633*^9}},
+ CellLabel->"In[1]:=",ExpressionUUID->"05606b4a-e7b5-4347-8193-87f408eee2c0"],
+
+Cell[BoxData[
+ TemplateBox[{
+  "Import", "nffil", 
+   "\"File \\!\\(\\*RowBox[{\\\"\\\\\\\"data.csv\\\\\\\"\\\"}]\\) not found \
+during \\!\\(\\*RowBox[{\\\"Import\\\"}]\\).\"", 2, 2, 1, 
+   24019304072508788668, "Local"},
+  "MessageTemplate"]], "Message", "MSG",
+ CellChangeTimes->{3.836358993806507*^9},
+ CellLabel->
+  "During evaluation of \
+In[1]:=",ExpressionUUID->"02e380a1-fbc4-4c3f-809e-29dd3f898055"],
+
+Cell[BoxData[
+ TemplateBox[{
+  "Set", "wrsym", "\"Symbol \\!\\(\\*RowBox[{\\\"N\\\"}]\\) is Protected.\"", 
+   2, 3, 2, 24019304072508788668, "Local"},
+  "MessageTemplate"]], "Message", "MSG",
+ CellChangeTimes->{3.8363589938854313`*^9},
+ CellLabel->
+  "During evaluation of \
+In[1]:=",ExpressionUUID->"4e4de162-3a30-4542-8b2a-053cd2a6a469"],
+
+Cell[BoxData[
+ TemplateBox[{
+  "Part", "partd", 
+   "\"Part specification \\!\\(\\*RowBox[{\\\"$Failed\\\", \\\"\
+\[LeftDoubleBracket]\\\", \\\"1\\\", \\\"\[RightDoubleBracket]\\\"}]\\) is \
+longer than depth of object.\"", 2, 4, 3, 24019304072508788668, "Local"},
+  "MessageTemplate"]], "Message", "MSG",
+ CellChangeTimes->{3.836358993978345*^9},
+ CellLabel->
+  "During evaluation of \
+In[1]:=",ExpressionUUID->"20569b72-77f4-4398-9beb-f6df12e574ca"],
+
+Cell[BoxData[
+ TemplateBox[{
+  "Part", "take", 
+   "\"Cannot take positions \\!\\(\\*RowBox[{\\\"1\\\"}]\\) through \
+\\!\\(\\*RowBox[{\\\"2200\\\"}]\\) in \
+\\!\\(\\*RowBox[{\\\"$Failed\\\"}]\\).\"", 2, 5, 4, 24019304072508788668, 
+   "Local"},
+  "MessageTemplate"]], "Message", "MSG",
+ CellChangeTimes->{3.836358994078252*^9},
+ CellLabel->
+  "During evaluation of \
+In[1]:=",ExpressionUUID->"0628e4da-7600-4be7-9ad2-673e0e66d4cd"],
+
+Cell[BoxData[
+ TemplateBox[{
+  "Part", "take", 
+   "\"Cannot take positions \\!\\(\\*RowBox[{\\\"1\\\"}]\\) through \
+\\!\\(\\*RowBox[{\\\"2200\\\"}]\\) in \
+\\!\\(\\*RowBox[{\\\"$Failed\\\"}]\\).\"", 2, 6, 5, 24019304072508788668, 
+   "Local"},
+  "MessageTemplate"]], "Message", "MSG",
+ CellChangeTimes->{3.836358994136197*^9},
+ CellLabel->
+  "During evaluation of \
+In[1]:=",ExpressionUUID->"57a66375-57a4-4437-bc54-a9b95579292a"],
+
+Cell[BoxData[
+ TemplateBox[{
+  "Part", "span", 
+   "\"\\!\\(\\*RowBox[{\\\"2201\\\", \\\";;\\\", \\\"N\\\"}]\\) is not a \
+valid Span specification. A Span specification should be 1, 2, or 3 \
+machine-sized integers separated by ;;. (Any of the integers can be omitted \
+or replaced with All.)\"", 2, 7, 6, 24019304072508788668, "Local"},
+  "MessageTemplate"]], "Message", "MSG",
+ CellChangeTimes->{3.8363589942021356`*^9},
+ CellLabel->
+  "During evaluation of \
+In[1]:=",ExpressionUUID->"7503f4a2-7aef-457e-be6d-b691c4f47642"],
+
+Cell[BoxData[
+ TemplateBox[{
+  "Part", "span", 
+   "\"\\!\\(\\*RowBox[{\\\"2201\\\", \\\";;\\\", \\\"N\\\"}]\\) is not a \
+valid Span specification. A Span specification should be 1, 2, or 3 \
+machine-sized integers separated by ;;. (Any of the integers can be omitted \
+or replaced with All.)\"", 2, 8, 7, 24019304072508788668, "Local"},
+  "MessageTemplate"]], "Message", "MSG",
+ CellChangeTimes->{3.8363589942900534`*^9},
+ CellLabel->
+  "During evaluation of \
+In[1]:=",ExpressionUUID->"b288c3ee-bb2a-402e-8211-1b8c9de6599f"],
+
+Cell[BoxData[
+ TemplateBox[{
+  "NetChain", "argx", 
+   "\"\\!\\(\\*RowBox[{\\\"NetChain\\\"}]\\) called with \
+\\!\\(\\*RowBox[{\\\"7\\\"}]\\) arguments; 1 argument is expected.\"", 2, 9, 
+   8, 24019304072508788668, "Local"},
+  "MessageTemplate"]], "Message", "MSG",
+ CellChangeTimes->{3.8363589943689804`*^9},
+ CellLabel->
+  "During evaluation of \
+In[1]:=",ExpressionUUID->"78c5681f-6bd5-4d18-b8da-5f57e87753ae"],
+
+Cell[BoxData["$Failed"], "Output",
+ CellChangeTimes->{3.8363589944668894`*^9},
+ CellLabel->"Out[9]=",ExpressionUUID->"f47fbea3-64a8-402d-9e86-88a638cdbb67"]
+}, Open  ]]
+},
+WindowSize->{1152., 615.6},
+WindowMargins->{{
+  Automatic, -5.399999999999864}, {-5.399999999999977, Automatic}},
+FrontEndVersion->"12.3 for Microsoft Windows (64-bit) (May 11, 2021)",
+StyleDefinitions->"Default.nb",
+ExpressionUUID->"4c7fae0b-9a3d-4862-9b84-2b3030ac6527"
+]
+(* End of Notebook Content *)
+
+(* Internal cache information *)
+(*CellTagsOutline
+CellTagsIndex->{}
+*)
+(*CellTagsIndex
+CellTagsIndex->{}
+*)
+(*NotebookFileOutline
+Notebook[{
+Cell[CellGroupData[{
+Cell[580, 22, 2048, 62, 226, "Input",ExpressionUUID->"05606b4a-e7b5-4347-8193-87f408eee2c0"],
+Cell[2631, 86, 409, 10, 35, "Message",ExpressionUUID->"02e380a1-fbc4-4c3f-809e-29dd3f898055"],
+Cell[3043, 98, 340, 8, 35, "Message",ExpressionUUID->"4e4de162-3a30-4542-8b2a-053cd2a6a469"],
+Cell[3386, 108, 451, 10, 35, "Message",ExpressionUUID->"20569b72-77f4-4398-9beb-f6df12e574ca"],
+Cell[3840, 120, 432, 11, 35, "Message",ExpressionUUID->"0628e4da-7600-4be7-9ad2-673e0e66d4cd"],
+Cell[4275, 133, 432, 11, 35, "Message",ExpressionUUID->"57a66375-57a4-4437-bc54-a9b95579292a"],
+Cell[4710, 146, 527, 11, 59, "Message",ExpressionUUID->"7503f4a2-7aef-457e-be6d-b691c4f47642"],
+Cell[5240, 159, 527, 11, 59, "Message",ExpressionUUID->"b288c3ee-bb2a-402e-8211-1b8c9de6599f"],
+Cell[5770, 172, 415, 10, 35, "Message",ExpressionUUID->"78c5681f-6bd5-4d18-b8da-5f57e87753ae"],
+Cell[6188, 184, 156, 2, 60, "Output",ExpressionUUID->"f47fbea3-64a8-402d-9e86-88a638cdbb67"]
+}, Open  ]]
+}
+]
+*)
+

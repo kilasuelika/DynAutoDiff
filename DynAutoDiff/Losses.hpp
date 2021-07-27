@@ -102,7 +102,7 @@ template <typename T = double> struct MSELossEvalGrad : EvalGradFunctionBase<T> 
     boost::json::object to_json() const override {
         boost::json::object res;
         res["name"] = "mse_loss";
-        res["Recution"] = R;
+        res["Redcution"] = R;
         return res;
     };
     void eval(TMap<T> &dest, const std::vector<TMap<T>> &inputs) override {

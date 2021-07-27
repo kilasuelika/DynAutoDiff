@@ -71,6 +71,10 @@ template <typename T = double> class GraphManager {
                      [](boost::json::value &v) -> std::unique_ptr<EvalGradFunctionBase<T>> {
                          return std::make_unique<SigmoidEvalGrad<T>>();
                      }},
+                    {"ReLUEvalGrad",
+                     [](boost::json::value &v) -> std::unique_ptr<EvalGradFunctionBase<T>> {
+                         return std::make_unique<ReLUEvalGrad<T>>();
+                     }},
                     {"PowEvalGrad",
                      [](boost::json::value &v) -> std::unique_ptr<EvalGradFunctionBase<T>> {
                          return std::make_unique<PowEvalGrad<T>>(v.get_object()["n"].get_int64());
@@ -147,10 +151,14 @@ template <typename T = double> class GraphManager {
                          return std::make_unique<MSELossEvalGrad<T>>(
                              v.get_object()["Reduction"].as_int64());
                      }}};
+
+    template <typename T1> friend struct NaiveGD;
+    template <typename T1> friend struct Adam;
+
     std::shared_ptr<Var<T>> _root;
     //_parm_nodes: leaf with gradient.
     std::vector<std::shared_ptr<Var<T>>> _all_nodes, _parm_nodes, _intermediate_grad_nodes;
-    std::vector<T> _val, _grad;
+    TVecA<T> _val, _grad;
     bool _v_allocated, _g_allocated;
     int _nparm = 0;
 
@@ -216,13 +224,13 @@ template <typename T = double> class GraphManager {
     }
 
     // We must initialize _input_node after all node have been read.
-    void _create_input_node() {}
+    void _create_input_node(){};
     void _update_nparm() {
         _nparm = 0;
         for (const auto &node : _parm_nodes) {
             _nparm += node->size();
         }
-    }
+    };
 
   public:
     GraphManager(){};
@@ -261,6 +269,8 @@ template <typename T = double> class GraphManager {
     int nparm() const { return _nparm; };
     const auto &all_nodes() const { return _all_nodes; };
     auto &root() const { return _root; };
+    const auto &val() const { return _val; };
+    const auto &grad() const { return _grad; };
 
     int total_nodes() const { return _all_nodes.size(); };
     const TMap<T> &run(bool clear_leaf_grad = true) {
@@ -279,11 +289,14 @@ template <typename T = double> class GraphManager {
         // Always clear intermediate nodes.
         for (auto &node : _intermediate_grad_nodes)
             node->_grad.setZero();
-
         if (clear_leaf) {
-            for (auto &node : _parm_nodes) {
-                node->_grad.setZero();
-            }
+            if (_g_allocated) {
+                _grad.setZero();
+            } else {
+                for (auto &node : _parm_nodes) {
+                    node->_grad.setZero();
+                }
+            };
         }
     };
     void zero_eval_flag() {
@@ -297,18 +310,24 @@ template <typename T = double> class GraphManager {
         for (auto &node : _parm_nodes) {
             node->bind(val + k, grad == nullptr ? nullptr : grad + k, node->rows(), node->cols());
             k += node->size();
-        }
-    }
+        };
+    };
     // Allocate val and grad in continguous memory.
     std::pair<TMap<T>, TMap<T>> auto_bind_parm() {
-        _val.resize(_nparm);
-        _grad.resize(_nparm);
-        bind(_val.data(), _grad.data());
-        _v_allocated = true;
-        _g_allocated = true;
-		
-		return std::make_pair(TMap<T>(_val.data(), _nparm, 1), TMap<T>(_grad.data(), _nparm, 1));
-    }
+        if (_v_allocated && _g_allocated) {
+
+        } else {
+            _val.resize(_nparm);
+            _grad.resize(_nparm);
+            // Copy data.
+            copy_parm_val_to(_val.data());
+
+            bind(_val.data(), _grad.data());
+            _v_allocated = true;
+            _g_allocated = true;
+        };
+        return std::make_pair(TMap<T>(_val.data(), _nparm, 1), TMap<T>(_grad.data(), _nparm, 1));
+    };
     //
     void zero_all(bool clear_leaf = true) {
         zero_eval_flag();

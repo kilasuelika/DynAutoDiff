@@ -26,7 +26,6 @@ template <typename T = double> requires std::same_as<T, double> struct CeresOpti
             gm.zero_all();
             gm.run();
             gm.copy_parm_grad_to(gradient);
-            // std::cout << gm.parm_nodes()[0]->val() << std::endl;
             *cost = gm.root()->val().coeff(0, 0);
             return true;
         }

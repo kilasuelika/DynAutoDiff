@@ -17,6 +17,7 @@ using TMat = Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
 template <typename T = double>
 using TArr = Eigen::Array<T, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
 template <typename T = double> using TVec = Eigen::Matrix<T, Eigen::Dynamic, 1>;
+template <typename T = double> using TVecA = Eigen::Array<T, Eigen::Dynamic, 1>;
 template <typename T = double> using TRVec = Eigen::Matrix<T, 1, Eigen::Dynamic>;
 using TVecd = Eigen::Matrix<double, Eigen::Dynamic, 1>;
 template <typename T = double> using TMap = Eigen::Map<TMat<T>>;
@@ -112,6 +113,21 @@ template <typename T = double> TMat<T> load_mat(const std::string &filename) {
     return res;
 };
 
+template<typename T>
+void write_mat( const T& mat, const std::string& filename, const std::string& delimiter=","){
+	std::ofstream file(filename);
+	int m=mat.rows(), n=mat.cols();
+	for(int i=0;i<m-1;++i){
+		for(int j=0;j<n-1;++j){
+			file<<mat.coeff(i,j)<<delimiter;
+		}
+		file<<mat.coeff(i, n-1)<<std::endl;
+	}
+	for(int j=0;j<n-1;++j){
+			file<<mat.coeff(m-1,j)<<delimiter;
+		}
+		file<<mat.coeff(m-1, n-1);
+}
 // Convert a matrix to a json array.
 template <typename T> boost::json::array to_json_array(const T &data) {
     boost::json::array res;

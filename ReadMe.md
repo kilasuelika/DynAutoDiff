@@ -49,6 +49,8 @@ The main part of this library is a header-only library and depend on `Eigen, boo
 
 There are also a series of wrapper classes for `ceres` (CeresOptimizer.hpp), `NLopt` (nloptoptimizer.hpp). They are not included in `DynAutoDiff.hpp`. To use these, you need to install them by yourselves.
 
+There is a `GDOptimizer.hpp` that implements `NaiveGD, Adam` that can be used to train a neural network. It has been included in the main library.
+
 If you want to run tests, then you need `boost`.
 
 If you want to run some examples, then you need to install more. For example the example *ceres_neural_network* requires `ceres` or more.
@@ -145,6 +147,16 @@ auto p2v = (1.0 / sqrt(pow(2 * numbers::pi, 10))) / sqrt(det(S2)) *
                exp(-0.5 * diag(Xmu2 * inv(S2), transpose(Xmu2)));
 auto ll = -sum(ln(p * p1v + (1 - p) * p2v));
 GraphManager<> gm(ll);
+```
+
+### Neural Network Regression
+
+This example locates in `examples/neural_network`:
+
+```cpp
+
+
+
 ```
 
 ## Reference Guide

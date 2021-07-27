@@ -1,5 +1,6 @@
 #ifndef __DYNAUTODIFF_COMMON__
 #define __DYNAUTODIFF_COMMON__
+#include <boost/assert.hpp>
 #include <numbers>
 
 namespace DynAutoDiff {

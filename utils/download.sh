@@ -1,6 +1,5 @@
 #!/bin/bash
 
-
 rm -rf tmp
 mkdir tmp
 cd tmp
@@ -16,7 +15,11 @@ cp -r math/include/boost ../../DynAutoDiff
 
 #boost.json
 git clone --depth 1 https://github.com/boostorg/json.git
-cp -r json/include/boost boost ../../DynAutoDiff
+cp -r json/include/boost ../../DynAutoDiff
+
+#boost.assert
+git clone --depth 1 https://github.com/boostorg/assert.git
+cp -r assert/include/boost ../../DynAutoDiff
 
 cd ..
 rm -rf tmp
