@@ -44,15 +44,22 @@ BOOST_AUTO_TEST_CASE(exp_test) {
     m5.run();
     BOOST_CHECK_CLOSE(v2->g(), -0.606530659713, 1e-5);
 }
+BOOST_AUTO_TEST_CASE(multi_branch_test) {
+    auto x1=psca(2.0),x2=psca(3.0),x3=psca(4.0),x4=psca(5.0);
+	auto y1=x1*x2+x3;
+	auto y2=y1*x4+y1;
 
+	GraphManager<> m1(y2);
+	m1.run();
+	BOOST_CHECK_CLOSE(y2->v(), 60.0, 1e-5);
+	BOOST_CHECK_CLOSE(x1->g(), 18.0, 1e-5);
+}
 BOOST_AUTO_TEST_CASE(compound_test) {
     auto x1 = rowvec({1.0, 5.0}), s1 = psca(5.0), Sigma = mat({6.0, 7.0, 8.0, 9.0}, 2, 2, true),
          x2 = vec({2.0, 6.0});
     auto y1 = (s1 - x1) * x2 + s1;
     GraphManager<> m1(y1);
-    m1.zero_all();
-    y1->eval();
-    y1->backward();
+    m1.run();
     BOOST_CHECK_EQUAL(y1->val().coeff(0, 0), 13);
     BOOST_CHECK_EQUAL(s1->grad().coeff(0, 0), 9);
 
@@ -89,9 +96,7 @@ BOOST_AUTO_TEST_CASE(times_test) {
     // auto y2 = 5 * x1 * s1 * Sigma * x2;
     auto y2 = x1 * Sigma * x2;
     GraphManager<> m2(y2);
-    m2.zero_all();
-    y2->eval();
-    y2->backward();
+    m2.run();
     // BOOST_CHECK_EQUAL(y2->val().coeff(0, 0), 10100);
     // BOOST_CHECK_EQUAL(s1->grad().coeff(0, 0), 2020);
     BOOST_CHECK_EQUAL(Sigma->grad().coeff(0, 0), 2);
@@ -99,13 +104,12 @@ BOOST_AUTO_TEST_CASE(times_test) {
 
     auto y3 = x1 * s1 * Sigma * x2;
     GraphManager<> m3(y3);
-    m3.zero_all();
-    // cout << "y3 grad before: " << endl << Sigma->grad() << endl;
-    y3->eval();
-    y3->backward();
+    m3.run();
     BOOST_CHECK_EQUAL(y3->val().coeff(0, 0), 2020);
     BOOST_CHECK_EQUAL(s1->grad().coeff(0, 0), 404);
+    // BOOST_CHECK_EQUAL(x2->grad().coeff(0, 0), 230);
     BOOST_CHECK_EQUAL(Sigma->grad().coeff(0, 0), 10);
+    BOOST_CHECK_EQUAL(Sigma->grad().coeff(0, 1), 30);
     BOOST_CHECK_EQUAL(Sigma->grad().coeff(1, 1), 150);
 
     auto y4 = s1 * x1 * Sigma * x2;
@@ -158,26 +162,20 @@ BOOST_AUTO_TEST_CASE(sigmoid_test) {
     auto x1 = psca(5.0), x2 = psca(6.0), x3 = psca(-7.0);
     auto y1 = sigmoid(x1) + sigmoid(x2 - 5.5);
     GraphManager<> m1(y1);
-    m1.zero_all();
-    y1->eval();
-    y1->backward();
+    m1.run();
     BOOST_CHECK_CLOSE(y1->v(), 1.61577, 1e-2);
     BOOST_CHECK_CLOSE(x1->g(), 0.00664806, 1e-2);
 
     auto y2 = sigmoid(x1 + x3) + x2 * sigmoid(x2 + x3);
     GraphManager<> m2(y2);
-    m2.zero_all();
-    y2->eval();
-    y2->backward();
+    m2.run();
     BOOST_CHECK_CLOSE(y2->v(), 1.73285, 1e-2);
     BOOST_CHECK_CLOSE(x1->g(), 0.104994, 1e-2);
     BOOST_CHECK_CLOSE(x2->g(), 1.44861, 1e-2);
 
     auto y3 = pow(sigmoid(x1 + x2 / 2 + x3) + x1 - x2, 2);
     GraphManager<> m3(y3);
-    m3.zero_all();
-    y3->eval();
-    y3->backward();
+    m3.run();
     BOOST_CHECK_CLOSE(y3->v(), 0.0723295, 1e-2);
     BOOST_CHECK_CLOSE(x1->g(), -0.643637, 1e-2);
 
@@ -243,13 +241,13 @@ BOOST_AUTO_TEST_CASE(log_division_test) {
 }
 BOOST_AUTO_TEST_CASE(sqrt_test) {
     auto x1 = psca(2.0), x2 = psca(5.0);
-    auto y1 = 1.0/sqrt(x1);
+    auto y1 = 1.0 / sqrt(x1);
     GraphManager<> m1(y1);
     m1.run();
-    BOOST_CHECK_EQUAL(y1->val().coeff(0, 0), 1.0/std::sqrt(2.0));
+    BOOST_CHECK_EQUAL(y1->val().coeff(0, 0), 1.0 / std::sqrt(2.0));
     BOOST_CHECK_CLOSE(x1->g(), -0.176776695297, 1e-5);
 
-	auto y2 = 1.0/x1;
+    auto y2 = 1.0 / x1;
     GraphManager<> m2(y2);
     m2.run();
     BOOST_CHECK_EQUAL(y2->val().coeff(0, 0), 0.5);
@@ -257,13 +255,13 @@ BOOST_AUTO_TEST_CASE(sqrt_test) {
 }
 
 BOOST_AUTO_TEST_CASE(relu_test) {
-    auto m=pmat<double>({-2,-1,1,2},2,2);
-	auto y=relu(m);
+    auto m = pmat<double>({-2, -1, 1, 2}, 2, 2);
+    auto y = relu(m);
     GraphManager<> m1(y);
     m1.run();
     BOOST_CHECK_EQUAL(y->v(), 0);
-    BOOST_CHECK_CLOSE(y->v(1,0),1, 1e-5);
-	BOOST_CHECK_CLOSE(m->g(),0, 1e-5);
-	BOOST_CHECK_CLOSE(m->g(1,1),1, 1e-5);
+    BOOST_CHECK_CLOSE(y->v(1, 0), 1, 1e-5);
+    BOOST_CHECK_CLOSE(m->g(), 0, 1e-5);
+    BOOST_CHECK_CLOSE(m->g(1, 1), 1, 1e-5);
 }
 BOOST_AUTO_TEST_SUITE_END()

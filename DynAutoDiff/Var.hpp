@@ -552,8 +552,9 @@ BINARYARITHOP(
         UNWRAP(G *R.coeff(0, 0)), UNWRAP(eigen_scalar_mat(T((G.array() * L.array()).sum()))),
         UNWRAP(G *R.transpose()), UNWRAP(L.transpose() * G),
         (lhs->cols() == rhs->rows()) || (lhs->size() == 1) || (rhs->size() == 1),
-        UNWRAP("Cols of left matrix should be equal to rows of the right matrix for matrix "
-         "multiplication operator * or at least one of them is actually a scalar. Shapes are: "))
+        UNWRAP(
+            "Cols of left matrix should be equal to rows of the right matrix for matrix "
+            "multiplication operator * or at least one of them is actually a scalar. Shapes are: "))
 // division
 BINARYARITHOP(
     /, Division, inputs[0].array() + inputs[1].array(), UNWRAP(std::max(lhs->rows(), rhs->rows())),
@@ -1104,7 +1105,7 @@ template <typename T = double> struct SumEvalGrad : EvalGradFunctionBase<T> {
     };
 };
 
-// D=2 for all.
+// D=-1: all , D=0: rowwise .
 template <int D = -1, typename T = double>
 std::shared_ptr<Var<T>> sum(const std::shared_ptr<Var<T>> &operand) {
     std::vector<std::shared_ptr<Var<T>>> input_nodes{operand};
@@ -1118,6 +1119,199 @@ std::shared_ptr<Var<T>> sum(const std::shared_ptr<Var<T>> &operand) {
         return std::make_shared<Var<T>>(1, 1, (operand->requires_grad()), input_nodes,
                                         std::make_unique<SumEvalGrad<T>>(D));
     };
+};
+
+template <typename T = double> struct MeanEvalGrad : EvalGradFunctionBase<T> {
+    int D; // MatReduction
+    MeanEvalGrad(int D) : D(D){};
+    std::string get_name() const override { return "MeanEvalGrad"; };
+    boost::json::object to_json() const override {
+        boost::json::object res;
+        res["name"] = "MeanEvalGrad";
+        res["D"] = D;
+        return res;
+    };
+    void eval(TMap<T> &dest, const std::vector<TMap<T>> &inputs) override {
+        const auto &X = inputs[0];
+        if (D == -1) {
+            dest.coeffRef(0, 0) = X.mean();
+        } else if (D == 0) {
+            dest = X.rowwise().mean();
+        } else if (D == 1) {
+            dest = X.colwise().mean();
+        } else {
+            throw std::range_error("Invalid dimension " + std::to_string(D) +
+                                   ". Allowed values are -1(all), 0(row-wise sum), 1(col).");
+        }
+    };
+    std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) {
+        const auto &arr = current->input_node(0)->val().array();
+        const auto &G = current->grad();
+        if (D == -1) {
+            return {G.coeff(0, 0) * TMat<T>::Constant(arr.rows(), arr.cols(), 1.0 / arr.size())};
+        } else if (D == 0) {
+            return {
+                _broadcasting_mul(G, TMat<T>::Constant(arr.rows(), arr.cols(), 1.0 / arr.cols()))};
+        } else if (D == 1) {
+            return {
+                _broadcasting_mul(G, TMat<T>::Constant(arr.rows(), arr.cols(), 1.0 / arr.rows()))};
+        } else {
+            throw std::range_error("Invalid dimension " + std::to_string(D) +
+                                   ". Allowed values are -1(all), 0(row-wise sum), 1(col).");
+        }
+    };
+};
+
+// D=-1: all , D=0: rowwise .
+template <int D = -1, typename T = double>
+std::shared_ptr<Var<T>> mean(const std::shared_ptr<Var<T>> &operand) {
+    std::vector<std::shared_ptr<Var<T>>> input_nodes{operand};
+    if constexpr (D == 0) {
+        return std::make_shared<Var<T>>(operand->rows(), 1, (operand->requires_grad()), input_nodes,
+                                        std::make_unique<MeanEvalGrad<T>>(D));
+    } else if constexpr (D == 1) {
+        return std::make_shared<Var<T>>(1, operand->cols(), (operand->requires_grad()), input_nodes,
+                                        std::make_unique<MeanEvalGrad<T>>(D));
+    } else {
+        return std::make_shared<Var<T>>(1, 1, (operand->requires_grad()), input_nodes,
+                                        std::make_unique<MeanEvalGrad<T>>(D));
+    };
+};
+
+template <typename T = double> struct VarianceEvalGrad : EvalGradFunctionBase<T> {
+    int D; // Mat Dim
+    TMat<T> x_d;
+    VarianceEvalGrad(int D) : D(D){};
+    std::string get_name() const override { return "VarianceEvalGrad"; };
+    boost::json::object to_json() const override {
+        boost::json::object res;
+        res["name"] = "VarianceEvalGrad";
+        res["D"] = D;
+        return res;
+    };
+    void eval(TMap<T> &dest, const std::vector<TMap<T>> &inputs) override {
+        const auto &X = inputs[0];
+        if (D == -1) {
+            x_d = X.array() - X.mean();
+            dest.coeffRef(0, 0) = x_d.array().pow(2).mean();
+        } else if (D == 0) {
+            x_d = X.colwise() - X.rowwise().mean();
+            dest = x_d.array().pow(2).rowwise().mean();
+        } else if (D == 1) {
+            x_d = X.rowwise() - X.colwise().mean();
+            dest = x_d.array().pow(2).colwise().mean();
+        } else {
+            throw std::range_error("Invalid dimension " + std::to_string(D) +
+                                   ". Allowed values are -1(all), 0(row-wise sum), 1(col).");
+        }
+    };
+    std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) {
+        const auto &arr = current->input_node(0)->val().array();
+        const auto &G = current->grad();
+
+        if (D == -1) {
+            return {G.coeff(0, 0) * 2.0 / arr.size() * x_d};
+        } else if (D == 0) {
+            return {G.coeff(0, 0) * 2.0 / arr.cols() * x_d};
+        } else if (D == 1) {
+            return {G.coeff(0, 0) * 2.0 / arr.rows() * x_d};
+        } else {
+            throw std::range_error("Invalid dimension " + std::to_string(D) +
+                                   ". Allowed values are -1(all), 0(row-wise sum), 1(col).");
+        }
+    };
+};
+
+// D=-1: all , D=0: rowwise .
+template <int D = -1, typename T = double>
+std::shared_ptr<Var<T>> variance(const std::shared_ptr<Var<T>> &operand) {
+    std::vector<std::shared_ptr<Var<T>>> input_nodes{operand};
+    if constexpr (D == 0) {
+        return std::make_shared<Var<T>>(operand->rows(), 1, (operand->requires_grad()), input_nodes,
+                                        std::make_unique<VarianceEvalGrad<T>>(D));
+    } else if constexpr (D == 1) {
+        return std::make_shared<Var<T>>(1, operand->cols(), (operand->requires_grad()), input_nodes,
+                                        std::make_unique<VarianceEvalGrad<T>>(D));
+    } else {
+        return std::make_shared<Var<T>>(1, 1, (operand->requires_grad()), input_nodes,
+                                        std::make_unique<VarianceEvalGrad<T>>(D));
+    };
+};
+
+template <typename T = double> struct LinearEvalGrad : EvalGradFunctionBase<T> {
+    int type; // 0: b is a scalar, 1: b is a row vector, 2: b is a column vector.
+    std::string get_name() const override { return "LinearEvalGrad"; };
+    boost::json::object to_json() const override {
+        boost::json::object res;
+        res["name"] = "LinearEvalGrad";
+        return res;
+    };
+    void eval(TMap<T> &dest, const std::vector<TMap<T>> &inputs) override {
+        const auto &A = inputs[0];
+        const auto &x = inputs[1];
+        const auto &b = inputs[2];
+        if (b.size() == 1) [[unlikely]] {
+            type = 0;
+            dest = (A * x).array() + b.coeff(0, 0);
+        } else if (b.rows() == 1) {
+            type = 1;
+            dest = A * x;
+            for (auto row : dest.rowwise()) {
+                row += b;
+            }
+        } else if (b.cols() == 1) {
+            type = 2;
+            dest = A * x;
+            for (auto col : dest.colwise()) {
+                col += b;
+            }
+        } else {
+            throw std::range_error("b is not a scalar or a vector for linear(A,x,b).");
+        }
+    };
+    std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) {
+        const auto &A = current->input_node(0)->val();
+        const auto &x = current->input_node(1)->val();
+        const auto &b = current->input_node(2)->val();
+        const auto &G = current->grad();
+        std::vector<TMat<T>> res(3);
+        if (current->input_node(0)->requires_grad()) {
+            res[0] = G * x.transpose();
+        } else {
+            res[0] = TMat<T>();
+        };
+        if (current->input_node(1)->requires_grad()) {
+            res[1] = A.transpose() * G;
+        } else {
+            res[1] = TMat<T>();
+        };
+        if (current->input_node(2)->requires_grad()) {
+            if (type == 0) {
+                res[2] = eigen_scalar_mat(T(G.sum()));
+            } else if (type == 1) {
+                res[2] = G.colwise().sum();
+            } else { // type==2
+                res[2] = G.rowwise().sum();
+            }
+        } else {
+            res[2] = TMat<T>();
+        };
+        return res;
+    };
+};
+
+// A*x+b
+template <int D = -1, typename T = double>
+std::shared_ptr<Var<T>> linear(const std::shared_ptr<Var<T>> &A, const std::shared_ptr<Var<T>> &x,
+                               const std::shared_ptr<Var<T>> &b) {
+    assert(((A->cols() == x->rows()) &&
+            ((b->size() == 1) || ((b->rows() == 1) && (b->cols() == x->cols())) ||
+             ((b->cols() == 1) && (A->rows() == b->rows())))) &&
+           "A*x must be a valid matrix product for linear(). And b should be a scalar or vector.");
+    std::vector<std::shared_ptr<Var<T>>> input_nodes{A, x, b};
+    return std::make_shared<Var<T>>(
+        A->rows(), x->cols(), (A->requires_grad() || x->requires_grad() || b->requires_grad()),
+        input_nodes, std::make_unique<LinearEvalGrad<T>>());
 };
 
 }; // namespace DynAutoDiff

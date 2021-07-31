@@ -131,6 +131,22 @@ template <typename T = double> class GraphManager {
                      [](boost::json::value &v) -> std::unique_ptr<EvalGradFunctionBase<T>> {
                          return std::make_unique<IVecuEvalGrad<T>>();
                      }},
+                    {"LinearEvalGrad",
+                     [](boost::json::value &v) -> std::unique_ptr<EvalGradFunctionBase<T>> {
+                         return std::make_unique<LinearEvalGrad<T>>();
+                     }},
+                    {"SumEvalGrad",
+                     [](boost::json::value &v) -> std::unique_ptr<EvalGradFunctionBase<T>> {
+                         return std::make_unique<SumEvalGrad<T>>(v.get_object()["D"].get_int64());
+                     }},
+                    {"MeanEvalGrad",
+                     [](boost::json::value &v) -> std::unique_ptr<EvalGradFunctionBase<T>> {
+                         return std::make_unique<MeanEvalGrad<T>>(v.get_object()["D"].get_int64());
+                     }},
+                    {"VarianceEvalGrad",
+                     [](boost::json::value &v) -> std::unique_ptr<EvalGradFunctionBase<T>> {
+                         return std::make_unique<VarianceEvalGrad<T>>(v.get_object()["D"].get_int64());
+                     }},
                     {"LnMVNormalDenEvalGrad",
                      [](boost::json::value &v) -> std::unique_ptr<EvalGradFunctionBase<T>> {
                          return std::make_unique<LnMVNormalDenEvalGrad<T>>(
@@ -159,7 +175,7 @@ template <typename T = double> class GraphManager {
     //_parm_nodes: leaf with gradient.
     std::vector<std::shared_ptr<Var<T>>> _all_nodes, _parm_nodes, _intermediate_grad_nodes;
     TVecA<T> _val, _grad;
-    bool _v_allocated, _g_allocated;
+    bool _v_allocated = false, _g_allocated = false;
     int _nparm = 0;
 
     void _reset_visit_status() {
@@ -273,8 +289,8 @@ template <typename T = double> class GraphManager {
     const auto &grad() const { return _grad; };
 
     int total_nodes() const { return _all_nodes.size(); };
-    const TMap<T> &run(bool clear_leaf_grad = true) {
-        zero_all(clear_leaf_grad);
+    const TMap<T> &run(bool _zero_grad = true) {
+        zero_all(_zero_grad);
         _root->eval();
         _root->backward();
         return _root->_val;
@@ -285,19 +301,17 @@ template <typename T = double> class GraphManager {
     };
     // If clear_leaf==false, then only clear gradients of non-leaf nodes(which represents
     // intermediate results).
-    void zero_grad(bool clear_leaf = false) {
+    void zero_grad() {
         // Always clear intermediate nodes.
-        for (auto &node : _intermediate_grad_nodes)
-            node->_grad.setZero();
-        if (clear_leaf) {
-            if (_g_allocated) {
-                _grad.setZero();
-            } else {
-                for (auto &node : _parm_nodes) {
-                    node->_grad.setZero();
-                }
-            };
-        }
+        // for (auto &node : _intermediate_grad_nodes)
+        //    node->_grad.setZero();
+        if (_g_allocated) {
+            _grad.setZero();
+        } else {
+            for (auto &node : _parm_nodes) {
+                node->_grad.setZero();
+            }
+        };
     };
     void zero_eval_flag() {
         for (auto &node : _all_nodes) {
@@ -329,9 +343,10 @@ template <typename T = double> class GraphManager {
         return std::make_pair(TMap<T>(_val.data(), _nparm, 1), TMap<T>(_grad.data(), _nparm, 1));
     };
     //
-    void zero_all(bool clear_leaf = true) {
+    void zero_all(bool _zero_grad = true) {
         zero_eval_flag();
-        zero_grad(clear_leaf);
+        if (_zero_grad)
+            zero_grad();
     };
     // Write a json file. Root is the first node.
     void save(const std::string &filename) {

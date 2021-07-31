@@ -143,4 +143,59 @@ BOOST_AUTO_TEST_CASE(sum_test) {
     BOOST_CHECK(Y->grad() == _Y);
     BOOST_CHECK(v->grad() == _v);
 }
+
+BOOST_AUTO_TEST_CASE(linear_test) {
+    auto A = pmat({1.0, 2.0, 3.0, 4.0}, 2, 2), x = pvec({2.0, 3.0}), b = pvec({5.0, -2.0});
+    auto y = sum(linear(A, x, b));
+
+    GraphManager<> gm(y);
+    gm.run();
+    BOOST_CHECK_EQUAL(y->v(), 29.0);
+    BOOST_CHECK_EQUAL(A->g(0, 0), 2);
+    BOOST_CHECK_EQUAL(A->g(0, 1), 3);
+    BOOST_CHECK_EQUAL(b->g(0, 0), 1);
+
+    auto s = psca(9.0);
+    auto y1 = sum(linear(A, x, s));
+
+    GraphManager<> gm1(y1);
+    gm1.run();
+    BOOST_CHECK_EQUAL(y1->v(), 44.0);
+    BOOST_CHECK_EQUAL(A->g(0, 0), 2);
+    BOOST_CHECK_EQUAL(A->g(0, 1), 3);
+    BOOST_CHECK_EQUAL(s->g(), 2);
+}
+
+BOOST_AUTO_TEST_CASE(mean_test) {
+    auto A = pmat({1.0, 2.0, 3.0, 4.0, -1.0, 6.0}, 3, 2), x = prowvec({2.0, 3.0, -6.0});
+    auto y = x * mean<Dim::Row>(A);
+
+    GraphManager<> gm(y);
+    gm.run();
+    BOOST_CHECK_EQUAL(y->v(), -3.0 / 2);
+    BOOST_CHECK_EQUAL(A->g(0, 0), 1);
+    BOOST_CHECK_EQUAL(A->g(0, 1), 1);
+    BOOST_CHECK_EQUAL(x->g(0, 0), 3.0 / 2);
+}
+
+BOOST_AUTO_TEST_CASE(variance_test) {
+    auto A = pmat({1.0, 2.0, 3.0, 4.0, -1.0, 6.0}, 3, 2), x = prowvec({2.0, 3.0, -6.0}),
+         s = psca(2.0);
+
+    auto y = x * variance<Dim::Row>(A);
+    GraphManager<> gm(y);
+    gm.run();
+    BOOST_CHECK_EQUAL(y->v(), -289.0 / 4);
+    BOOST_CHECK_EQUAL(A->g(0, 0), -1);
+    BOOST_CHECK_EQUAL(A->g(0, 1), 1);
+    BOOST_CHECK_EQUAL(x->g(0, 0), 1.0 / 4);
+
+    auto y1 = s * variance(A);
+    GraphManager<> gm1(y1);
+    gm1.run();
+    BOOST_CHECK_CLOSE(y1->v(), 59.0 / 6, 1e-10);
+    BOOST_CHECK_CLOSE(A->g(0, 0), -1, 1e-10);
+    BOOST_CHECK_CLOSE(A->g(0, 1), -1.0 / 3, TL);
+    BOOST_CHECK_CLOSE(s->g(0, 0), 59.0 / 12, TL);
+}
 BOOST_AUTO_TEST_SUITE_END()

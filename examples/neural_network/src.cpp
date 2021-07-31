@@ -1,5 +1,6 @@
 #include "../../DynAutoDiff/CeresOptimizer.hpp"
 #include <algorithm>
+#include <chrono>
 
 using namespace Eigen;
 using namespace std;
@@ -66,7 +67,8 @@ int main() {
     ConstLR c_scheduler(1e-6);
     Adam adam_opt(&gm, &c_scheduler);
 
-    for (int i = 0; i < 50000; ++i) {
+    auto start = chrono::high_resolution_clock::now();
+    for (int i = 0; i < 5000; ++i) {
         adam_opt.step();
         if (i % 100 == 0) {
             gm1.run();
@@ -75,6 +77,7 @@ int main() {
                  << endl;
         }
     }
-
+    auto end = chrono::high_resolution_clock::now();
+    cout << "Total time: " << chrono::duration_cast<chrono::seconds>(end - start).count() << endl;
     gm.save("graph.json");
 }

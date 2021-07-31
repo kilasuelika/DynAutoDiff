@@ -304,10 +304,10 @@ can create a variable with values read from "data.txt". It should be a tab-delim
 
 #### Basic Math Functions
 
-1. `+, -, *, /`: *+, -, /* are element-wise operation (one of them can be a scalar). *\** is matrix product (or scalar-matrix product). `eprod(X,Y)`: element wise product, *X,Y* must have the same shape (thus not a scalar and a matrix). `offset(X, x)`: *X* is a matrix, *x* is a column or row vector. If *x* is a column vector, then add it to each column of *X* (thus shape must match), vice versa. `scale(X, x)`, like *offset*, but now is element-wise times.
+1. `+, -, *, /`: *+, -, /* are element-wise operation (one of them can be a scalar). *\** is matrix product (or scalar-matrix product). `eprod(X,Y)`: element wise product, *X,Y* must have the same shape (thus not a scalar and a matrix). `offset(X, x)`: *X* is a matrix, *x* is a column or row vector. If *x* is a column vector, then add it to each column of *X* (thus shape must match), vice versa. `scale(X, x)`, like *offset*, but now is element-wise times. `linear(A, x, b)`: $Ax+b$. *b* can be a scalar or column or row vector.
 1. Element-wise functions: `exp`, `ln`, `sqrt`,`pow(x, d)`, `sin`, `cos`,`tan`,`sinh`, `cosh`, `tanh`, `sigmoid`, `relu`.
-2. `lpnorm(X, Dim=-1)`: `Dim=-1 | 0 | 1`, `-1`(all, return a scalar), `0` (norm of each row, return a column vector), `1` (return a row vector).
-3. `sum(X, Dim=-1)`.
+2. `mean<Dim=All>(X), sum<Dim=All>(X), variance<Dim=All>(X)`. *Dim=All | Row | Sum*. Calculate mean, sum or variance along dim. *Dim=All* :return a scalar. *Dim=Row* :return a column vector in which an element is the statistic of each row . *Dim=Col* :return a row vector.
+3. `lpnorm<n=2, Dim=All>(X)`.  $L_p,p>0$ norm. If $n>=50$, then treat as infinity norm.
 
 #### Matrix Operators
 
@@ -381,20 +381,18 @@ To carry out a fresh computation, use
 
 ```cpp
 GraphManager<> gm(y); //y is a variable.
-gm.run(clear_leaf_grad=true);
+gm.run(_zero_grad=true);
 ```
 
 It's equivalent to:
 
 ```cpp
-zero_all(clear_leaf_grad); // Clear all gradient.
+zero_all(_zero_grad);
 _root->eval();
 _root->backward();
 ```
 
-If `clear_leaf_grad=true`, then it will also clear gradient of leaf nodes  (parameters).
-
-Sometimes you want to loop over samples and accumualate gradients on leaf nodes. Then just use
+Sometimes you want to loop over samples and accumulate gradients. Then just use
 
 ```
 gm.run(false);
@@ -410,4 +408,4 @@ Sometimes you want the memory of parameter nodes to be contiguous. Then you can 
 auto [val, grad]& = gm.auto_bind_parm();
 ```
 
-Here `val, grad` both are column vectors with type `TMap<T>`. 
+Here `val, grad` both are column vectors with type `TMap<T>`.

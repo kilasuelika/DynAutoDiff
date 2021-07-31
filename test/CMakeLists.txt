@@ -14,9 +14,10 @@ find_package(Ceres REQUIRED)
 #add_compile_options( -Wall -Wextra)
 
 #set(Targets test_arithmetic_operator test_neural_network test_matrix  
-#	test_eigen_helper test_init_var test_losses test_IO test_ceres_optimizer test_distributions)
+#	test_eigen_helper test_init_var test_losses test_IO test_distributions)
 #set(CeresTragets test_ceres_optimizer)
-set(Targets test_arithmetic_operator test_distributions)
+#set(Targets test_arithmetic_operator test_distributions)
+set(Targets test_matrix)
 foreach(tgt ${Targets})
 	add_executable(${tgt} ${tgt}.cpp)
 	target_compile_features(${tgt} PUBLIC cxx_std_20)
