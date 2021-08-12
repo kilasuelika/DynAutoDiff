@@ -45,14 +45,14 @@ BOOST_AUTO_TEST_CASE(exp_test) {
     BOOST_CHECK_CLOSE(v2->g(), -0.606530659713, 1e-5);
 }
 BOOST_AUTO_TEST_CASE(multi_branch_test) {
-    auto x1=psca(2.0),x2=psca(3.0),x3=psca(4.0),x4=psca(5.0);
-	auto y1=x1*x2+x3;
-	auto y2=y1*x4+y1;
+    auto x1 = psca(2.0), x2 = psca(3.0), x3 = psca(4.0), x4 = psca(5.0);
+    auto y1 = x1 * x2 + x3;
+    auto y2 = y1 * x4 + y1;
 
-	GraphManager<> m1(y2);
-	m1.run();
-	BOOST_CHECK_CLOSE(y2->v(), 60.0, 1e-5);
-	BOOST_CHECK_CLOSE(x1->g(), 18.0, 1e-5);
+    GraphManager<> m1(y2);
+    m1.run();
+    BOOST_CHECK_CLOSE(y2->v(), 60.0, 1e-5);
+    BOOST_CHECK_CLOSE(x1->g(), 18.0, 1e-5);
 }
 BOOST_AUTO_TEST_CASE(compound_test) {
     auto x1 = rowvec({1.0, 5.0}), s1 = psca(5.0), Sigma = mat({6.0, 7.0, 8.0, 9.0}, 2, 2, true),
@@ -263,5 +263,47 @@ BOOST_AUTO_TEST_CASE(relu_test) {
     BOOST_CHECK_CLOSE(y->v(1, 0), 1, 1e-5);
     BOOST_CHECK_CLOSE(m->g(), 0, 1e-5);
     BOOST_CHECK_CLOSE(m->g(1, 1), 1, 1e-5);
+}
+BOOST_AUTO_TEST_CASE(softmax_test) {
+    auto x1 = psca(1.0), x2 = psca(0.5), x3 = psca(0.6);
+    auto z = prowvec({1.0, 2.0, 3.0});
+    std::vector<std::shared_ptr<Var<>>> x{x1, x2, x3};
+    auto y = z * softmax(x);
+    GraphManager<> m1(y);
+    m1.run();
+    BOOST_CHECK_CLOSE(y->v(), 1.8552035, 1e-5);
+    BOOST_CHECK_CLOSE(x1->g(), -0.3756080817, 1e-5);
+    BOOST_CHECK_CLOSE(x2->g(), 0.03857235815, 1e-5);
+    BOOST_CHECK_CLOSE(x3->g(), 0.33703572359, 1e-5);
+}
+BOOST_AUTO_TEST_CASE(weighted_sum_test) {
+    auto v1 = pvec({1.0, -1.0, 2.0}), v2 = pvec({3.0, 4.0, 6.0}), w1 = psca(0.3), w2 = psca(0.4);
+    vector<shared_ptr<Var<>>> x{v1, v2}, w{w1, w2};
+    auto y = transpose(v1) * sum(x, w);
+    GraphManager<> m1(y);
+    m1.run();
+
+    BOOST_CHECK_CLOSE(y->v(), 6.2, TL);
+    BOOST_CHECK_CLOSE(v1->g(0), 1.8, TL);
+    BOOST_CHECK_CLOSE(v2->g(0), 0.4, TL);
+    BOOST_CHECK_CLOSE(w1->g(), 6, TL);
+    BOOST_CHECK_CLOSE(w2->g(), 11, TL);
+}
+BOOST_AUTO_TEST_CASE(cat_test) {
+    auto v1_1 = pvec({1.0, -1.0}), v2 = pvec({3.0, 4.0, 6.0}), w1 = psca(0.3), w2 = psca(0.4);
+    auto v1_2 = psca({2.0});
+    auto v1 = cat({v1_1, v1_2});
+
+    vector<shared_ptr<Var<>>> x{v1, v2}, w{w1, w2};
+    auto y = transpose(v1) * sum(x, w);
+    GraphManager<> m1(y);
+    m1.run();
+
+    BOOST_CHECK_CLOSE(y->v(), 6.2, TL);
+    BOOST_CHECK_CLOSE(v1_1->g(0), 1.8, TL);
+    BOOST_CHECK_CLOSE(v1_2->g(0), 3.6, TL);
+    BOOST_CHECK_CLOSE(v2->g(0), 0.4, TL);
+    BOOST_CHECK_CLOSE(w1->g(), 6, TL);
+    BOOST_CHECK_CLOSE(w2->g(), 11, TL);
 }
 BOOST_AUTO_TEST_SUITE_END()

@@ -313,11 +313,12 @@ can create a variable with values read from "data.txt". It should be a tab-delim
 
 1. `inv(X)`: matrix inverse $X^{-1}$.
 2. `transpose(X)`: matrix transpose $X^T$.
-3. `trace(X)`: trace of a matrix. `trace(X, Y)`: trace of $XY$.
-4. `det(X), logdet(X)`: determinant and natural log determinant.
-5. `lsdot(X)`: left-self-dot $XX^T$. `rsdot(X)`: right-self-dot $X^TX$. They can be used to construct a semi-positive definitive matrix.
-6. `diag(X)`: extract diagonal elements to form a column vector. `diag(X, Y)`: $\text{diag}(XY)$. `diagonal(v)`: construct a diagonal matrix by a vector (both column and row).
-7. `vec(X)`: stack columns to form a column vector. `vech(X)`: stack columns of lower part to form a column vector. $X$ must be a square matrix. `ivech(v)`: unstack a vector to form a symmetric matrix. For example, if *v* has size 6, then the result will be a $2\times 2$ symmetric matrix ($\frac{(1+3)\times 3}{2}=6$).
+3. `cat<D=0>({x1,x2,...}), cat<D=0>(vector<shared_ptr<Var<>>)`: concate by `D=0`(row), `D=1`(col).  
+4. `trace(X)`: trace of a matrix. `trace(X, Y)`: trace of $XY$.
+5. `det(X), logdet(X)`: determinant and natural log determinant.
+6. `lsdot(X)`: left-self-dot $XX^T$. `rsdot(X)`: right-self-dot $X^TX$. They can be used to construct a semi-positive definitive matrix.
+7. `diag(X)`: extract diagonal elements to form a column vector. `diag(X, Y)`: $\text{diag}(XY)$. `diagonal(v)`: construct a diagonal matrix by a vector (both column and row).
+8. `vec(X)`: stack columns to form a column vector. `vech(X)`: stack columns of lower part to form a column vector. $X$ must be a square matrix. `ivech(v)`: unstack a vector to form a symmetric matrix. For example, if *v* has size 6, then the result will be a $2\times 2$ symmetric matrix ($\frac{(1+3)\times 3}{2}=6$).
 This is usefull when you want to optimize a symmetric matrix.
 $$
 [1,2,3,4,5,6]\implies \begin{bmatrix}

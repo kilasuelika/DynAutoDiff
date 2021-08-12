@@ -21,5 +21,9 @@ cp -r json/include/boost ../../DynAutoDiff
 git clone --depth 1 https://github.com/boostorg/assert.git
 cp -r assert/include/boost ../../DynAutoDiff
 
+#boost.lexical_cast
+git clone --depth 1 https://github.com/boostorg/lexical_cast.git
+cp -r lexical_cast/include/boost ../../DynAutoDiff
+
 cd ..
 rm -rf tmp

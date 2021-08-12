@@ -830,6 +830,113 @@ UNARYFUNCTION(ivecu, IVecu, _s_size(operand->size()), _s_size(operand->size()),
                             "Input should be a vector, and the size must be appropriate for lower "
                             "part of a square matrix.");),
               , , )
+
+//-----------------------------------------------------------------------------
+// Cat
+template <typename T = double> struct CatEvalGrad : EvalGradFunctionBase<T> {
+    int D = 0, n;
+    std::vector<std::pair<int, int>> pos;
+    CatEvalGrad(int D) : D(D){};
+    std::string get_name() const override { return "CatEvalGrad"; };
+    boost::json::object to_json() const override {
+        boost::json::object res;
+        res["name"] = "CatEvalGrad";
+        res["D"] = D;
+        return res;
+    };
+    void eval(TMap<T> &dest, const std::vector<TMap<T>> &inputs) override {
+        n = inputs.size();
+        pos.resize(n);
+        if (D == 0) {
+            int k = 0;
+            for (int i = 0; i < n; ++i) {
+                auto &mat = inputs[i];
+                pos[i] = std::pair<int, int>(k, mat.rows());
+                dest(Eigen::seqN(k, mat.rows()), Eigen::all) = mat;
+                k += mat.rows();
+            }
+        } else if (D == 1) {
+            int k = 0;
+            for (int i = 0; i < n; ++i) {
+                auto &mat = inputs[i];
+                pos[i] = std::pair<int, int>(k, mat.cols());
+                dest(Eigen::all, Eigen::seqN(k, mat.cols())) = mat;
+                k += mat.cols();
+            }
+        } else {
+            throw std::invalid_argument("Invalid dimension for CatEvalGrad. Allowed values are "
+                                        "0(row), 1(col). But given value is " +
+                                        std::to_string(D));
+        }
+    };
+    std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) {
+        const auto &G = current->grad();
+        std::vector<TMat<T>> res(n);
+
+        if (D == 0) {
+            for (int i = 0; i < n; ++i) {
+                auto &p = pos[i];
+                res[i] = G(Eigen::seqN(p.first, p.second), Eigen::all);
+            }
+        } else if (D == 1) {
+            for (int i = 0; i < n; ++i) {
+                auto &p = pos[i];
+                res[i] = G(Eigen::all, Eigen::seqN(p.first, p.second));
+            }
+        }
+
+        return res;
+    };
+};
+
+// D=0: row, D=1: col.
+template <int D = 0, typename T = double>
+std::shared_ptr<Var<T>> cat(const std::vector<std::shared_ptr<Var<T>>> &x) {
+
+    int N = x.size();
+    // requires_grad
+    bool requires_grad = false;
+    for (auto &node : x) {
+        requires_grad = requires_grad || node->requires_grad();
+    }
+
+    int rows, cols;
+    // check size
+    if constexpr (D == 0) {
+        rows = 0;
+        cols = x[0]->cols();
+        for (int i = 0; i < N; ++i) {
+            if (x[i]->cols() != cols)
+                throw std::runtime_error("Columns of each element should be equal in cat<0>(x).");
+            else {
+                rows += x[i]->rows();
+            }
+        }
+    } else if constexpr (D == 1) {
+        rows = x[0]->rows();
+        cols = 0;
+        for (int i = 0; i < N; ++i) {
+            if (x[i]->rows() != rows)
+                throw std::runtime_error("Rows of each element should be equal in cat<1>(x).");
+            else {
+                cols += x[i]->cols();
+            }
+        }
+    } else {
+        throw std::invalid_argument("Invalid dimension for cat<dimension>(x). Allowed values are "
+                                    "0(row), 1(col). But given value is " +
+                                    std::to_string(D));
+    }
+
+    return std::make_shared<Var<T>>(rows, cols, requires_grad, x,
+                                    std::make_unique<CatEvalGrad<T>>(D));
+};
+
+template <int D = 0, typename T = double>
+std::shared_ptr<Var<T>> cat(std::initializer_list<std::shared_ptr<Var<T>>> &x) {
+    std::vector<std::shared_ptr<Var<T>>> xv = x;
+    return cat(xv);
+};
 // norm. D: dim, 0(all), 1(row, norm of each row, get a row vector ), 2(col)
 template <typename T = double> struct LpNormEvalGrad : EvalGradFunctionBase<T> {
     int n; // Power
@@ -1121,6 +1228,79 @@ std::shared_ptr<Var<T>> sum(const std::shared_ptr<Var<T>> &operand) {
     };
 };
 
+//-----------------------------------------------------------------------------
+template <typename T = double> struct WeightedSumVVEvalGrad : EvalGradFunctionBase<T> {
+    int n = 0;
+    std::string get_name() const override { return "WeightedSumVVEvalGrad"; };
+    boost::json::object to_json() const override {
+        boost::json::object res;
+        res["name"] = "WeightedSumVVEvalGrad";
+        return res;
+    };
+    void eval(TMap<T> &dest, const std::vector<TMap<T>> &inputs) override {
+        n = inputs.size() / 2;
+        dest.setZero();
+        for (int i = 0; i < n; ++i) {
+            dest += inputs[i * 2] * inputs[i * 2 + 1].coeff(0, 0);
+        };
+    };
+    std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) {
+        const auto &arr = current->input_node(0)->val().array();
+        const auto &G = current->grad();
+        std::vector<TMat<T>> res;
+        for (int i = 0; i < n; ++i) {
+            res.emplace_back(G * current->input_node(2 * i + 1)->val().coeff(0, 0));
+            res.emplace_back(
+                eigen_scalar_mat(T((G.array() * current->input_node(2 * i)->val().array()).sum())));
+        }
+        return res;
+    };
+};
+
+template <int D = -1, typename T = double>
+std::shared_ptr<Var<T>> sum(const std::vector<std::shared_ptr<Var<T>>> &x,
+                            const std::vector<std::shared_ptr<Var<T>>> &weights) {
+    std::vector<std::shared_ptr<Var<T>>> input_nodes;
+    // Check size of x and weights to be equal.
+    if (x.size() != weights.size()) {
+        throw(std::runtime_error(
+            "Size of x and weights must be equal in sum(x, weights). However they are " +
+            std::to_string(x.size()) + " and " + std::to_string(weights.size()) + "."));
+    }
+    // Add nodes.
+    for (int i = 0; i < x.size(); ++i) {
+        input_nodes.emplace_back(x[i]);
+        input_nodes.emplace_back(weights[i]);
+    }
+    // Check equal size of elements of x.
+    int rows = x[0]->rows(), cols = x[0]->cols();
+    for (int i = 1; i < x.size(); ++i) {
+        auto node = x[i];
+        if ((node->rows() != rows) || (node->cols() != cols)) {
+            throw(std::runtime_error(
+                "Element size of x in sum(x, weights) must be equal. However size of element " +
+                std::to_string(i) + " and previous element are " +
+                _shape_str(node->rows(), node->cols(), x[i - 1]->rows(), x[i - 1]->cols()) + "."));
+        }
+    }
+    // Check weights to be scalar.
+    for (int i = 0; i < weights.size(); ++i) {
+        auto node = weights[i];
+        if (node->size() != 1) {
+            throw(std::runtime_error(
+                "Element size of weights in sum(x, weights) must be 1. However it's " +
+                std::to_string(node->size()) + " for element " + std::to_string(i) + "."));
+        }
+    }
+    // requires_grad
+    bool requires_grad = false;
+    for (auto &node : x) {
+        requires_grad = requires_grad || node->requires_grad();
+    }
+    return std::make_shared<Var<T>>(rows, cols, requires_grad, input_nodes,
+                                    std::make_unique<WeightedSumVVEvalGrad<T>>());
+};
+//-----------------------------------------------------------------------------
 template <typename T = double> struct MeanEvalGrad : EvalGradFunctionBase<T> {
     int D; // MatReduction
     MeanEvalGrad(int D) : D(D){};
@@ -1312,6 +1492,44 @@ std::shared_ptr<Var<T>> linear(const std::shared_ptr<Var<T>> &A, const std::shar
     return std::make_shared<Var<T>>(
         A->rows(), x->cols(), (A->requires_grad() || x->requires_grad() || b->requires_grad()),
         input_nodes, std::make_unique<LinearEvalGrad<T>>());
+};
+
+template <typename T = double> struct SoftmaxVEvalGrad : EvalGradFunctionBase<T> {
+    int k;
+    std::string get_name() const override { return "SumEvalGrad"; };
+    boost::json::object to_json() const override {
+        boost::json::object res;
+        res["name"] = "SoftmaxVEvalGrad";
+        return res;
+    };
+    void eval(TMap<T> &dest, const std::vector<TMap<T>> &inputs) override {
+        k = inputs.size();
+        for (int i = 0; i < k; ++i) {
+            dest.coeffRef(i, 0) = inputs[i].coeff(0, 0);
+        };
+        dest = dest.array().exp();
+        dest = dest / dest.sum();
+    };
+    std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) {
+        std::vector<TMat<T>> res(k);
+        T s = (current->val().array() * current->grad().array()).sum();
+        for (int i = 0; i < k; ++i) {
+            T tmp = current->val().coeff(i, 0) * (current->grad().coeff(i, 0) - s);
+            res[i] = eigen_scalar_mat(tmp);
+        }
+        return res;
+    };
+};
+
+template <int D = -1, typename T = double>
+std::shared_ptr<Var<T>> softmax(const std::vector<std::shared_ptr<Var<T>>> &input_nodes) {
+    bool requires_grad = false;
+    for (int i = 0; i < input_nodes.size(); ++i) {
+        assert((input_nodes[i]->size() == 1) && "Size of each node in softmax() should be 1.");
+        requires_grad = (requires_grad || input_nodes[i]->requires_grad());
+    };
+    return std::make_shared<Var<T>>(input_nodes.size(), 1, requires_grad, input_nodes,
+                                    std::make_unique<SoftmaxVEvalGrad<T>>());
 };
 
 }; // namespace DynAutoDiff

@@ -33,7 +33,17 @@ BOOST_AUTO_TEST_CASE(load_mat_test) {
     BOOST_CHECK_EQUAL(y.cols(), 1);
     BOOST_CHECK_CLOSE(y.coeff(99, 0), -1.70565299307618, TL);
 }
-BOOST_AUTO_TEST_CASE(ivecl_test) {}
+BOOST_AUTO_TEST_CASE(load_csv_test) {
+    auto X = load_mat("HSCCI.csv", 1, 2);
+
+    BOOST_CHECK_EQUAL(X.rows(), 7030);
+    BOOST_CHECK_EQUAL(X.cols(), 5);
+
+    BOOST_CHECK_CLOSE(X.coeff(0, 0), 1000.0, TL);
+    BOOST_CHECK_CLOSE(X.coeff(0, 4), 0.0, TL);
+    BOOST_CHECK_CLOSE(X.coeff(7029, 0), 4047.48, TL);
+    BOOST_CHECK_CLOSE(X.coeff(7029, 4), 6241065073.0, TL);
+}
 BOOST_AUTO_TEST_CASE(times_test) {}
 
 BOOST_AUTO_TEST_CASE(division_test) {}
