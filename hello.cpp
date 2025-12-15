@@ -17,4 +17,4 @@ int main() {
     // Save and load.
     gm.save("graph.json");
     auto z1 = gm.load("graph.json");
-};
+}

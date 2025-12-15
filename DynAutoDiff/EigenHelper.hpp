@@ -1,16 +1,17 @@
 #ifndef __DYNAUTODIFF_EIGENHELPER__
 #define __DYNAUTODIFF_EIGENHELPER__
 #include "boost/lexical_cast.hpp"
-#include "strtk/strtk.hpp"
-#include <boost/json.hpp>
-#include <eigen3/Eigen/Dense>
-#include <eigen3/Eigen/src/Core/util/Constants.h>
+// #include "strtk/strtk.hpp"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include "3rd_party/csv-parser/csv.hpp"
+#include <boost/json.hpp>
+#include <eigen3/Eigen/Dense>
+#include <eigen3/Eigen/src/Core/util/Constants.h>
 
 namespace DynAutoDiff {
 // Type definition
@@ -121,30 +122,31 @@ template <typename T = double> TMat<T> load_tab_file(const std::string &filename
 
 // decide shape of csv file.
 template <typename T = double> auto decide_csv_file_shape(const std::string &filename) {
-    std::ifstream file(filename);
+    csv::CSVReader reader(filename);
     int rows = 0, cols = 0;
-    std::string line;
-    std::vector<std::string> line_tokens;
-    std::getline(file, line);
 
+    csv::CSVRow row;
     const std::string csv_delimiter = ",";
-    strtk::parse(line, csv_delimiter, line_tokens);
-    cols = line_tokens.size();
+    //strtk::parse(line, csv_delimiter, line_tokens);
+
 
     ++rows;
-    while (std::getline(file, line)) {
-        if (line.size() > 0)
+    while (reader.read_row(row)) {
+        if (row.size() > 0)
             ++rows;
+
+        cols = row.size();
     }
 
     return std::make_pair(rows, cols);
-};
+}
 
 // Load csv file. Shape is automatically detected.
 template <typename T = double>
 TMat<T> load_csv_file(const std::string &filename, int skip_row = 0, int skip_column = 0) {
     auto [rows, cols] = decide_csv_file_shape<T>(filename);
-    std::ifstream file(filename);
+    //std::ifstream file(filename);
+    csv::CSVReader reader(filename);
     TMat<T> res(rows - skip_row, cols - skip_column);
 
     const std::string csv_delimiter = ",";
@@ -152,32 +154,26 @@ TMat<T> load_csv_file(const std::string &filename, int skip_row = 0, int skip_co
     std::string line;
 
     int k = 0, km = 0;
-    while (std::getline(file, line)) {
-        std::vector<std::string> line_tokens;
+    for (csv::CSVRow& row: reader) {
         ++k;
-        if (line.size() > 0) {
-            strtk::parse(line, csv_delimiter, line_tokens);
-            if (line_tokens.size() != cols) {
-                throw std::runtime_error("Columns at row " + std::to_string(k) + " is less than " +
-                                         std::to_string(cols) + ".");
+        if (k <= skip_row) {
+            continue;
+        } else {
+            int i=0;
+            for (csv::CSVField& field: row){
+                if (i<skip_column) continue;
+            //for (int i = skip_column; i < line_tokens.size(); ++i) {
+                T val;
+                try {
+                    val = std::stod(field.get<>());
+                } catch (...) {
+                    throw std::runtime_error("Failed to parse number at Row " +
+                                             std::to_string(k) + " Col " + std::to_string(i) +
+                                             ", string is: " + field.get<>());
+                }
+                res.coeffRef(km, i - skip_column) = val;
             };
-            
-            if (k <= skip_row) {
-                continue;
-            } else {
-                for (int i = skip_column; i < line_tokens.size(); ++i) {
-                    T val;
-                    try {
-                        val = std::stod(line_tokens[i]);
-                    } catch (...) {
-                        throw std::runtime_error("Failed to parse number at Row " +
-                                                 std::to_string(k) + " Col " + std::to_string(i) +
-                                                 ", string is: " + line_tokens[i]);
-                    }
-                    res.coeffRef(km, i - skip_column) = val;
-                };
-                ++km;
-            };
+            ++km;
         };
     }
 

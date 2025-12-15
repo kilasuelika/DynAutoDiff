@@ -1,7 +1,7 @@
 #ifndef __DYNAUTODIFF__
 #define __DYNAUTODIFF__
 #include "EigenHelper.hpp"
-#include "boost/json/src.hpp"
+#include <boost/json/src.hpp>
 #include <cmath>
 #include <concepts>
 #include <eigen3/Eigen/src/Core/util/Constants.h>
@@ -852,7 +852,7 @@ template <typename T = double> struct CatEvalGrad : EvalGradFunctionBase<T> {
             for (int i = 0; i < n; ++i) {
                 auto &mat = inputs[i];
                 pos[i] = std::pair<int, int>(k, mat.rows());
-                dest(Eigen::seqN(k, mat.rows()), Eigen::all) = mat;
+                dest(Eigen::seqN(k, mat.rows()), Eigen::indexing::all) = mat;
                 k += mat.rows();
             }
         } else if (D == 1) {
@@ -860,7 +860,7 @@ template <typename T = double> struct CatEvalGrad : EvalGradFunctionBase<T> {
             for (int i = 0; i < n; ++i) {
                 auto &mat = inputs[i];
                 pos[i] = std::pair<int, int>(k, mat.cols());
-                dest(Eigen::all, Eigen::seqN(k, mat.cols())) = mat;
+                dest(Eigen::indexing::all, Eigen::seqN(k, mat.cols())) = mat;
                 k += mat.cols();
             }
         } else {
@@ -876,12 +876,12 @@ template <typename T = double> struct CatEvalGrad : EvalGradFunctionBase<T> {
         if (D == 0) {
             for (int i = 0; i < n; ++i) {
                 auto &p = pos[i];
-                res[i] = G(Eigen::seqN(p.first, p.second), Eigen::all);
+                res[i] = G(Eigen::seqN(p.first, p.second), Eigen::indexing::all);
             }
         } else if (D == 1) {
             for (int i = 0; i < n; ++i) {
                 auto &p = pos[i];
-                res[i] = G(Eigen::all, Eigen::seqN(p.first, p.second));
+                res[i] = G(Eigen::indexing::all, Eigen::seqN(p.first, p.second));
             }
         }
 
