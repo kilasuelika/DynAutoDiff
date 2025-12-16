@@ -12,7 +12,7 @@ namespace DynAutoDiff {
 // doesn't have grad.
 template <typename T = double> requires std::same_as<T, double> struct CeresOptimizer {
     GraphManager<T> gm;
-    std::shared_ptr<Var<T>> root;
+    Var<T> root;
     std::vector<T> parm_data;
     std::vector<T> parm_nodes;
     int nparm = 0;
@@ -32,8 +32,8 @@ template <typename T = double> requires std::same_as<T, double> struct CeresOpti
         int NumParameters() const override { return gm.nparm(); }
     };
 
-    CeresOptimizer(std::shared_ptr<Var<T>> root,
-                   std::initializer_list<std::shared_ptr<Var<T>>> parm_nodes)
+    CeresOptimizer(Var<T> root,
+                   std::initializer_list<Var<T>> parm_nodes)
         : root(root), gm(root), parm_nodes(parm_nodes) {
         // Automatically bind memory.
         for (int i = 0; i < this->parm_nodes.size(); ++i) {
@@ -43,7 +43,7 @@ template <typename T = double> requires std::same_as<T, double> struct CeresOpti
         set_options();
     };
     // Automatically decide leaf nodes that need optimization.
-    CeresOptimizer(std::shared_ptr<Var<T>> root) : root(root), gm(root) {
+    CeresOptimizer(Var<T> root) : root(root), gm(root) {
         parm_data.resize(gm.nparm());
         gm.copy_parm_val_to(parm_data.data());
         set_options();

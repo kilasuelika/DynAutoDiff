@@ -13,13 +13,13 @@ namespace bm = boost::math;
 #define DISTFUNCTIONTEMPLATE(functionname, structname, functionargs, funinput, assertstmt,         \
                              requires_grad_stmt)                                                   \
     template <Reduction R = Sum, typename T = double>                                              \
-    std::shared_ptr<Var<T>> functionname(std::shared_ptr<Var<T>> X functionargs) {                 \
-        assertstmt std::vector<std::shared_ptr<Var<T>>> input_nodes{funinput};                     \
+    Var<T> functionname(Var<T> X functionargs) {                 \
+        assertstmt std::vector<Var<T>> input_nodes{funinput};                     \
         if constexpr (R == Reduction::None) {                                                      \
-            return std::make_shared<Var<T>>(X->rows(), 1, requires_grad_stmt, input_nodes,         \
+            return std::make_shared<VarImpl<T>>(X->rows(), 1, requires_grad_stmt, input_nodes,         \
                                             std::make_unique<structname##EvalGrad<T>>(R));         \
         } else {                                                                                   \
-            return std::make_shared<Var<T>>(1, 1, requires_grad_stmt, input_nodes,                 \
+            return std::make_shared<VarImpl<T>>(1, 1, requires_grad_stmt, input_nodes,                 \
                                             std::make_unique<structname##EvalGrad<T>>(R));         \
         }                                                                                          \
     };
@@ -63,23 +63,23 @@ template <typename T = double> struct LnMVNormalDenEvalGrad : EvalGradFunctionBa
             }
         }
     };
-    std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) override {
-        const auto &X = current->input_node(0)->val();
-        const auto &mu = current->input_node(1)->val();
-        const auto &Sigma = current->input_node(2)->val();
+    std::vector<TMat<T>> grad(const Var<T> &current) override {
+        const auto &X = current.input_node(0).val();
+        const auto &mu = current.input_node(1).val();
+        const auto &Sigma = current.input_node(2).val();
 
         std::vector<TMat<T>> res;
 
         // X
-        if (current->input_node(0)->requires_grad()) {
+        if (current.input_node(0).requires_grad()) {
             TMat<T> Xg(N, d);
             if (R == Reduction::None) {
                 for (int i = 0; i < N; ++i) {
                     Xg.row(i) =
-                        -(iS * Xmu.row(i).transpose()).transpose() * current->grad().coeff(i, 0);
+                        -(iS * Xmu.row(i).transpose()).transpose() * current.grad().coeff(i, 0);
                 }
             } else {
-                Xg = -(iS * Xmu.transpose()).transpose() * current->grad().coeff(0, 0);
+                Xg = -(iS * Xmu.transpose()).transpose() * current.grad().coeff(0, 0);
             }
             // std::cout << Xg << std::endl;
             if (R == Reduction::Mean) {
@@ -90,21 +90,21 @@ template <typename T = double> struct LnMVNormalDenEvalGrad : EvalGradFunctionBa
             res.emplace_back(TMat<T>());
         };
         // mu
-        if (current->input_node(1)->requires_grad()) {
+        if (current.input_node(1).requires_grad()) {
             TMat<T> mug(d, 1);
             // mu's gradient is negation of X's.
-            if (current->input_node(0)->requires_grad()) {
+            if (current.input_node(0).requires_grad()) {
                 mug = -res[0].colwise().sum().transpose();
             } else {
                 if (R == Reduction::None) {
                     TMat<T> Xg(N, d);
                     for (int i = 0; i < N; ++i) {
                         Xg.row(i) =
-                            (iS * Xmu.row(i).transpose()).transpose() * current->grad().coeff(i, 0);
+                            (iS * Xmu.row(i).transpose()).transpose() * current.grad().coeff(i, 0);
                     }
                     mug = Xg.colwise().sum().transpose();
                 } else {
-                    mug = (iS * Xmu.transpose()).rowwise().sum() * current->g();
+                    mug = (iS * Xmu.transpose()).rowwise().sum() * current.g();
                 }
             }
             if (R == Reduction::Mean) {
@@ -116,19 +116,19 @@ template <typename T = double> struct LnMVNormalDenEvalGrad : EvalGradFunctionBa
             res.emplace_back(TMat<T>());
         }
         // Sigma
-        if (current->input_node(2)->requires_grad()) {
+        if (current.input_node(2).requires_grad()) {
             TMat<T> Sg(d, d);
 
             if (R == Reduction::None) {
                 Sg.setZero();
                 for (int i = 0; i < N; ++i) {
                     Sg = Sg + iS.transpose() * Xmu.row(i).transpose() * Xmu.row(i) *
-                                  iS.transpose() * current->grad().coeff(i, 0);
+                                  iS.transpose() * current.grad().coeff(i, 0);
                 }
-                Sg = Sg - iS.transpose() * current->grad().sum();
+                Sg = Sg - iS.transpose() * current.grad().sum();
             } else {
                 Sg = iS.transpose() * Xmu.transpose() * Xmu * iS.transpose() *
-                     current->grad().coeff(0, 0);
+                     current.grad().coeff(0, 0);
                 Sg = Sg - iS.transpose() * N;
             }
 
@@ -179,20 +179,20 @@ template <typename T = double> struct LnNormalDenEvalGrad : EvalGradFunctionBase
             }
         }
     };
-    std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) override {
-        const auto &X = current->input_node(0)->val();
-        T mu = current->input_node(1)->val().coeff(0, 0);
-        T sigma = current->input_node(2)->val().coeff(0, 0);
+    std::vector<TMat<T>> grad(const Var<T> &current) override {
+        const auto &X = current.input_node(0).val();
+        T mu = current.input_node(1).val().coeff(0, 0);
+        T sigma = current.input_node(2).val().coeff(0, 0);
 
         std::vector<TMat<T>> res;
 
         // X
-        if (current->input_node(0)->requires_grad()) {
+        if (current.input_node(0).requires_grad()) {
             TMat<T> Xg(N, 1);
             if (R == Reduction::None) {
-                Xg = -Xmu.array() / (sigma * sigma) * current->grad().array();
+                Xg = -Xmu.array() / (sigma * sigma) * current.grad().array();
             } else {
-                Xg = -Xmu.array() / (sigma * sigma) * current->grad().coeff(0, 0);
+                Xg = -Xmu.array() / (sigma * sigma) * current.grad().coeff(0, 0);
 
                 if (R == Reduction::Mean) {
                     Xg = Xg / N;
@@ -204,16 +204,16 @@ template <typename T = double> struct LnNormalDenEvalGrad : EvalGradFunctionBase
             res.emplace_back(TMat<T>());
         };
         // mu
-        if (current->input_node(1)->requires_grad()) {
+        if (current.input_node(1).requires_grad()) {
             TMat<T> mug(1, 1);
             // mu's gradient is negation of X's.
-            if (current->input_node(0)->requires_grad()) {
+            if (current.input_node(0).requires_grad()) {
                 mug.coeffRef(0, 0) = -res[0].sum();
             } else {
                 if (R == Reduction::None) {
-                    mug.coeffRef(0, 0) = (Xmu.array() * current->grad().array()).sum() / (sigma * sigma);
+                    mug.coeffRef(0, 0) = (Xmu.array() * current.grad().array()).sum() / (sigma * sigma);
                 } else {
-                    mug.coeffRef(0, 0) = Xmu.sum() / (sigma * sigma) * current->grad().coeff(0, 0);
+                    mug.coeffRef(0, 0) = Xmu.sum() / (sigma * sigma) * current.grad().coeff(0, 0);
                     if (R == Reduction::Mean) {
                         mug = mug / N;
                     }
@@ -224,15 +224,15 @@ template <typename T = double> struct LnNormalDenEvalGrad : EvalGradFunctionBase
             res.emplace_back(TMat<T>());
         }
         // Sigma
-        if (current->input_node(2)->requires_grad()) {
+        if (current.input_node(2).requires_grad()) {
             TMat<T> sg(1, 1);
 
             if (R == Reduction::None) {
                 sg.coeffRef(0, 0) =
-                    ((-1.0 / sigma + Xmu2.array() / (std::pow(sigma, 3))) * current->grad().array()).sum();
+                    ((-1.0 / sigma + Xmu2.array() / (std::pow(sigma, 3))) * current.grad().array()).sum();
             } else {
                 sg.coeffRef(0, 0) = (-N / sigma + Xmu2.sum() / (std::pow(sigma, 3))) *
-                                    current->grad().coeff(0, 0);
+                                    current.grad().coeff(0, 0);
                 if (R == Reduction::Mean) {
                     sg = sg / N;
                 }
@@ -288,23 +288,23 @@ template <typename T = double> struct LnTDenEvalGrad : EvalGradFunctionBase<T> {
             }
         }
     };
-    std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) override {
-        const auto &X = current->input_node(0)->val();
-        T mu = current->input_node(1)->val().coeff(0, 0);
-        T sigma = current->input_node(2)->val().coeff(0, 0);
-        T nu = current->input_node(3)->val().coeff(0, 0);
+    std::vector<TMat<T>> grad(const Var<T> &current) override {
+        const auto &X = current.input_node(0).val();
+        T mu = current.input_node(1).val().coeff(0, 0);
+        T sigma = current.input_node(2).val().coeff(0, 0);
+        T nu = current.input_node(3).val().coeff(0, 0);
 
         std::vector<TMat<T>> res;
 
         // X
-        if (current->input_node(0)->requires_grad()) {
+        if (current.input_node(0).requires_grad()) {
             TMat<T> Xg(N, 1);
             if (R == Reduction::None) {
                 Xg = -(1 + 1.0 / nu) / (sigma * sigma) * xm.array() / fx.array() *
-                     current->grad().array();
+                     current.grad().array();
             } else {
                 Xg = -(1 + 1.0 / nu) / (sigma * sigma) * (xm.array() / fx.array()) *
-                     current->grad().coeff(0, 0);
+                     current.grad().coeff(0, 0);
 
                 if (R == Reduction::Mean) {
                     Xg = Xg / N;
@@ -316,19 +316,19 @@ template <typename T = double> struct LnTDenEvalGrad : EvalGradFunctionBase<T> {
             res.emplace_back(TMat<T>());
         };
         // mu
-        if (current->input_node(1)->requires_grad()) {
+        if (current.input_node(1).requires_grad()) {
             TMat<T> mug(1, 1);
             // mu's gradient is negation of X's.
-            if (current->input_node(0)->requires_grad()) {
+            if (current.input_node(0).requires_grad()) {
                 mug.coeffRef(0, 0) = -res[0].sum();
             } else {
                 if (R == Reduction::None) {
                     mug.coeffRef(0, 0) = (1 + 1.0 / nu) / (sigma * sigma) *
-                                         (xm.array() / fx.array() * current->grad().array()).sum();
+                                         (xm.array() / fx.array() * current.grad().array()).sum();
                 } else {
                     mug.coeffRef(0, 0) = (1 + 1.0 / nu) / (sigma * sigma) *
                                          (xm.array() / fx.array()).sum() *
-                                         current->grad().coeff(0, 0);
+                                         current.grad().coeff(0, 0);
                     if (R == Reduction::Mean) {
                         mug = mug / N;
                     }
@@ -339,18 +339,18 @@ template <typename T = double> struct LnTDenEvalGrad : EvalGradFunctionBase<T> {
             res.emplace_back(TMat<T>());
         }
         // sigma
-        if (current->input_node(2)->requires_grad()) {
+        if (current.input_node(2).requires_grad()) {
             TMat<T> sg(1, 1);
 
             if (R == Reduction::None) {
                 sg.coeffRef(0, 0) = ((-1.0 / sigma + (1 + 1.0 / nu) / (sigma * sigma * sigma) *
                                                          xm2.array() / fx.array()) *
-                                     current->grad().array())
+                                     current.grad().array())
                                         .sum();
             } else {
                 sg.coeffRef(0, 0) = (-N / sigma + (1 + 1.0 / nu) / (sigma * sigma * sigma) *
                                                       (xm2.array() / fx.array()).sum()) *
-                                    current->grad().coeff(0, 0);
+                                    current.grad().coeff(0, 0);
                 if (R == Reduction::Mean) {
                     sg = sg / N;
                 }
@@ -360,7 +360,7 @@ template <typename T = double> struct LnTDenEvalGrad : EvalGradFunctionBase<T> {
             res.emplace_back(TMat<T>());
         }
         // nu
-        if (current->input_node(3)->requires_grad()) {
+        if (current.input_node(3).requires_grad()) {
             TMat<T> nug(1, 1);
 
             if (R == Reduction::None) {
@@ -368,7 +368,7 @@ template <typename T = double> struct LnTDenEvalGrad : EvalGradFunctionBase<T> {
                     0.5 * ((bm::digamma((nu + 1) / 2) - bm::digamma(nu / 2) - 1.0 / nu -
                             (lfx.array() -
                              (nu + 1) / (nu * nu) / (sigma * sigma) * xm2.array() / fx.array())) *
-                           current->grad().array())
+                           current.grad().array())
                               .sum();
             } else {
                 nug.coeffRef(0, 0) =
@@ -377,7 +377,7 @@ template <typename T = double> struct LnTDenEvalGrad : EvalGradFunctionBase<T> {
                      (lfx.array() -
                       (nu + 1) / (nu * nu) / (sigma * sigma) * xm2.array() / fx.array())
                          .sum()) *
-                    current->grad().coeff(0, 0);
+                    current.grad().coeff(0, 0);
                 if (R == Reduction::Mean) {
                     nug = nug / N;
                 }
@@ -392,24 +392,24 @@ template <typename T = double> struct LnTDenEvalGrad : EvalGradFunctionBase<T> {
 
 DISTFUNCTIONTEMPLATE(
     ln_mvnormal_den, LnMVNormalDen,
-    UNWRAP(, std::shared_ptr<Var<T>> mu, std::shared_ptr<Var<T>> Sigma), UNWRAP(X, mu, Sigma),
+    UNWRAP(, Var<T> mu, Var<T> Sigma), UNWRAP(X, mu, Sigma),
     UNWRAP(assert(((mu->cols() == 1) && (Sigma->rows() == Sigma->cols())) &&
                   "mu should be a column vector. Sigma should be a square matrix.");),
-    X->requires_grad() || mu->requires_grad() || Sigma->requires_grad())
+    X.requires_grad() || mu.requires_grad() || Sigma.requires_grad())
 DISTFUNCTIONTEMPLATE(
-    ln_normal_den, LnNormalDen, UNWRAP(, std::shared_ptr<Var<T>> mu, std::shared_ptr<Var<T>> sigma),
+    ln_normal_den, LnNormalDen, UNWRAP(, Var<T> mu, Var<T> sigma),
     UNWRAP(X, mu, sigma),
     UNWRAP(assert(((X->cols() == 1) && (mu->size() == 1) && (sigma->size() == 1)) &&
                   "X must be a column vector. mu and sigma must be a scalar.");),
-    X->requires_grad() || mu->requires_grad() || sigma->requires_grad())
+    X.requires_grad() || mu.requires_grad() || sigma.requires_grad())
 DISTFUNCTIONTEMPLATE(
     ln_t_den, LnTDen,
-    UNWRAP(, std::shared_ptr<Var<T>> mu, std::shared_ptr<Var<T>> sigma, std::shared_ptr<Var<T>> nu),
+    UNWRAP(, Var<T> mu, Var<T> sigma, Var<T> nu),
     UNWRAP(X, mu, sigma, nu),
     UNWRAP(assert(((X->cols() == 1) && (mu->size() == 1) && (sigma->size() == 1) &&
                    (nu->size() == 1)) &&
                   "X must be a column vector. mu, sigma and nu must be scalars.");),
-    X->requires_grad() || mu->requires_grad() || sigma->requires_grad() || nu->requires_grad())
+    X.requires_grad() || mu.requires_grad() || sigma.requires_grad() || nu.requires_grad())
 #undef DISTFUNCTIONTEMPLATE
 #undef UNWRAP
 };     // namespace DynAutoDiff

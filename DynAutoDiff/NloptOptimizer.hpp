@@ -26,13 +26,13 @@ double NloptFunction(const std::vector<double> &x, std::vector<double> &grad, vo
 }
 template <typename T = double> requires std::same_as<T, double> struct NloptOptimizer {
     GraphManager<T> gm;
-    std::shared_ptr<Var<T>> root;
+    Var<T> root;
     std::vector<T> parm_data;
     std::vector<T> parm_nodes;
     int nparm = 0;
 
-    NloptOptimizer(std::shared_ptr<Var<T>> root,
-                   std::initializer_list<std::shared_ptr<Var<T>>> parm_nodes)
+    NloptOptimizer(Var<T> root,
+                   std::initializer_list<Var<T>> parm_nodes)
         : root(root), gm(root), parm_nodes(parm_nodes) {
         // Automatically bind memory.
         for (int i = 0; i < this->parm_nodes.size(); ++i) {
@@ -42,7 +42,7 @@ template <typename T = double> requires std::same_as<T, double> struct NloptOpti
         set_options();
     };
     // Automatically decide leaf nodes that need optimization.
-    NloptOptimizer(std::shared_ptr<Var<T>> root) : root(root), gm(root) {
+    NloptOptimizer(Var<T> root) : root(root), gm(root) {
         parm_data.resize(gm.nparm());
         gm.copy_parm_val_to(parm_data.data());
         set_options();

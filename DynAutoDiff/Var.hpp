@@ -21,20 +21,22 @@
 
 namespace DynAutoDiff {
 
-template <typename T> class Var;
-template <typename T> using SVar = std::shared_ptr<Var<T>>;
+template <typename T> class VarImpl;
+template<typename T> class Var;
+template <typename T> using SVarImpl = std::shared_ptr<VarImpl<T>>;
 
-using SVard = std::shared_ptr<Var<double>>;
+
+using SVarImpld = std::shared_ptr<VarImpl<double>>;
 
 template <typename T> struct EvalGradFunctionBase {
     virtual std::string get_name() const = 0;
     virtual boost::json::object to_json() const = 0;
     virtual void eval(TMap<T> &dest, const std::vector<TMap<T>> &inputs) = 0;
-    virtual std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) = 0;
+    virtual std::vector<TMat<T>> grad(const Var<T> &current) = 0;
 };
 
 template <typename T1, typename T2> static inline bool shape_match(const T1 &l, const T2 &r) {
-    return (l->rows() == r->rows()) && (l->cols() == r->cols());
+    return (l.rows() == r.rows()) && (l.cols() == r.cols());
 };
 static std::string _shape_str(int r1, int c1, int r2, int c2) {
     return "(" + std::to_string(r1) + ", " + std::to_string(c1) + ") and (" + std::to_string(r2) +
@@ -55,7 +57,7 @@ static inline int _matmul_result_cols(int r1, int c1, int r2, int c2) {
     }
 };
 
-template <typename T = double> class Var : public std::enable_shared_from_this<struct Var<T>> {
+template <typename T = double> class VarImpl : public std::enable_shared_from_this<struct VarImpl<T>> {
 
   private:
     template <typename T1> friend class GraphManager;
@@ -74,11 +76,12 @@ template <typename T = double> class Var : public std::enable_shared_from_this<s
 
     // bool _is_leaf;
 
-    std::vector<std::shared_ptr<struct Var<T>>> _input_nodes;
+    // std::vector<std::shared_ptr<struct VarImpl<T>>> _input_nodes;
+    std::vector<Var<T>> _input_nodes;
 
     std::allocator<T> _alloc;
 
-    std::unique_ptr<EvalGradFunctionBase<T>> fn = nullptr;
+    std::unique_ptr<EvalGradFunctionBase<T>> fn_ = nullptr;
 
     void _bind(T *val, T *grad, int rows, int cols, bool own_v, bool own_g) {
         if (val != _val.data()) {
@@ -113,8 +116,8 @@ template <typename T = double> class Var : public std::enable_shared_from_this<s
   public:
     using Scalar = T;
 
-    Var(){};
-    Var(int rows, int cols, bool requires_grad = false, bool allocate = true)
+    VarImpl(){};
+    VarImpl(int rows, int cols, bool requires_grad = false, bool allocate = true)
         : _rows(rows), _cols(cols), _size(rows * cols), _requires_grad(requires_grad),
           _val(nullptr, 0, 0), _grad(nullptr, 0, 0) {
         if (allocate) {
@@ -127,11 +130,11 @@ template <typename T = double> class Var : public std::enable_shared_from_this<s
             _bind(v, g, rows, cols, true, requires_grad);
         }
     };
-    Var(int rows, int cols, bool requires_grad,
-        const std::vector<std::shared_ptr<struct Var<T>>> &input_nodes,
+    VarImpl(int rows, int cols, bool requires_grad,
+        const std::vector<Var<T>> &input_nodes,
         std::unique_ptr<EvalGradFunctionBase<T>> fn)
         : _rows(rows), _cols(cols), _size(rows * cols), _requires_grad(requires_grad),
-          _val(nullptr, 0, 0), _grad(nullptr, 0, 0), _input_nodes(input_nodes), fn(std::move(fn)) {
+          _val(nullptr, 0, 0), _grad(nullptr, 0, 0), _input_nodes(input_nodes), fn_(std::move(fn)) {
         // Allocate memory for values.
         T *v = _alloc.allocate(rows * cols);
         T *g = nullptr;
@@ -141,13 +144,13 @@ template <typename T = double> class Var : public std::enable_shared_from_this<s
         };
         _bind(v, g, rows, cols, true, requires_grad);
     };
-    Var(T *val, T *grad, int rows, int cols)
+    VarImpl(T *val, T *grad, int rows, int cols)
         : _rows(rows), _cols(cols), _size(rows * cols), _requires_grad(requires_grad),
           _val(nullptr, 0, 0), _grad(nullptr, 0, 0) {
         _bind(val, grad, rows, cols, false, false);
     };
     // Read data from file.
-    Var(const std::string &file, bool requires_grad = false)
+    VarImpl(const std::string &file, bool requires_grad = false)
         : _val(nullptr, 0, 0), _grad(nullptr, 0, 0) {
         auto [rows, cols] = decide_shape<T>(file);
         _rows = rows;
@@ -167,7 +170,7 @@ template <typename T = double> class Var : public std::enable_shared_from_this<s
             }
         }
     };
-    /*Var(const TMat &val){
+    /*VarImpl(const TMat &val){
 
     };*/
     void release_memory() {
@@ -182,7 +185,7 @@ template <typename T = double> class Var : public std::enable_shared_from_this<s
             };
         };
     };
-    ~Var() { release_memory(); };
+    ~VarImpl() { release_memory(); };
 
     void setRandom() { _val.setRandom(); };
     void setRandomNormal(int seed = -1) {
@@ -195,10 +198,19 @@ template <typename T = double> class Var : public std::enable_shared_from_this<s
         std::for_each(this->vbegin(), this->vend(), [&eng, &dist](T &x) mutable { x = dist(eng); });
     };
 
+    void set_fn(std::unique_ptr<EvalGradFunctionBase<T>>&& v) {
+        fn_=std::move(v);
+    }
+    std::unique_ptr<EvalGradFunctionBase<T>>& fn() {return fn_;}
+
+    void set_id(int i) {_id=i;}
+    const int& id() const {return _id;}
+    bool is_leaf() const { return _leaf; };
+    void set_leaf(bool v) {_leaf=v;}
     int rows() const { return _rows; };
     int cols() const { return _cols; };
     int size() const { return _size; };
-    int input_size(int k) const { return _input_nodes[k]->size(); };
+    int input_size(int k) const { return _input_nodes[k].size(); };
     // constant value begin.
     const T *cvbegin() const { return _val.data(); };
     const T *cvend() const { return _val.data() + _size; };
@@ -230,9 +242,16 @@ template <typename T = double> class Var : public std::enable_shared_from_this<s
         };
         _bind(v, g, rows, cols, true, requires_grad);
     };
+    bool visited() const {return _visited;}
+    void set_visited(bool v) { _visited=v; }
+    bool evaluated() const {return _evaluated;}
+    void set_evaluated(bool v) {
+        _evaluated=v;
+    }
     // auto evaluated() const { return _evaluated; };
 
     const auto &val() const { return _val; };
+    void set_val(const TMat<T>& m) {_val=m;}
     // const auto& va()const {return _val.array();};
     T v(int i = -1, int j = -1) const {
         if (i == -1 && j == -1) {
@@ -250,7 +269,8 @@ template <typename T = double> class Var : public std::enable_shared_from_this<s
         } else {
             return _val.coeff(i, j);
         }
-    };
+    }
+    void set_grad(const TMat<T>& m) {_grad=m;}
     const auto &grad() const {
         if (!_requires_grad)
             throw(std::range_error("This node has no gradient."));
@@ -283,18 +303,19 @@ template <typename T = double> class Var : public std::enable_shared_from_this<s
     };
     // const auto& ga()const {return _grad.array();};
     const auto &input_nodes() const { return _input_nodes; };
+    void add_input_node(const Var<T>& v){_input_nodes.emplace_back(v);}
     auto input_node(int k) const { return _input_nodes[k]; };
 
     const TMap<T> &eval() {
         if (_evaluated) {
             return _val;
-        };
+        }
         if (_input_nodes.size() > 0) {
             std::vector<TMap<T>> inputs;
             for (size_t i = 0; i < _input_nodes.size(); ++i) {
-                inputs.emplace_back(_input_nodes[i]->eval());
+                inputs.emplace_back(_input_nodes[i].eval());
             };
-            fn->eval(_val, inputs);
+            fn_->eval(_val, inputs);
         }
         _evaluated = true;
         return _val;
@@ -306,141 +327,219 @@ template <typename T = double> class Var : public std::enable_shared_from_this<s
             else
                 _grad = seed;
             if (_input_nodes.size() > 0) {
-                std::vector<TMat<T>> grads = fn->grad(this->shared_from_this());
+                std::vector<TMat<T>> grads = fn_->grad(this->shared_from_this());
                 for (int i = 0; i < _input_nodes.size(); ++i) {
-                    _input_nodes[i]->backward(grads[i]);
-                };
-            };
-        };
-    };
+                    _input_nodes[i].backward(grads[i]);
+                }
+            }
+        }
+    }
     // eval() and backward()
     const TMap<T> &evalb() {
         eval();
         backward();
         return _val;
-    };
+    }
     void backward() {
         TMat<T> seed = TMat<T>::Ones(_rows, _cols);
         backward(seed);
-    };
+    }
     // Assign values.
     void operator=(std::initializer_list<T> v) {
         assert(
             (v.size() == _size) &&
-            "Input size should be equal to the size of variable for operator = initializer_list.");
+            "Input size should be equal to the size of VarImpliable for operator = initializer_list.");
         // std::copy(v.begin(), v.end(), _val.data());
         std::copy(v.begin(), v.end(), _val.data());
     };
 
+    void zero_grad() {
+        _grad.setZero();
+    }
     // Inplacement assign;
-    void operator=(const std::shared_ptr<struct Var<T>> &var){
+    void operator=(const std::shared_ptr<struct VarImpl<T>> &VarImpl){
 
     };
     // Assign Eigen data.
     template <typename TD> void operator=(const TD &data) { _val = data; }
 };
 
+
+
+template<typename T>
+class Var {
+public:
+    Var(std::shared_ptr<VarImpl<T>> ptr):
+        var_(std::move(ptr)) {
+
+    }
+
+    /**
+     * Operators
+     *
+     *
+     **/
+
+    Var<T> inv() const {
+        return inv(this);
+    }
+
+/**
+ *info
+ **/
+    void set_id(int i)const {var_->set_id(i);}
+    int id() const {return var_->id();}
+    int rows() const { return var_->rows(); }
+    int cols() const { return var_->cols(); }
+    int size() const { return var_->size(); }
+    int input_size(int k) const { return var_->input_size(k); }
+    const auto &input_nodes() const { return var_->input_nodes(); };
+    auto input_node(int k) const { return var_->input_node(k); }
+    bool requires_grad() const { return var_->requires_grad(); }
+    void set_visited(bool v) const { var_->set_visited(v); }
+    bool visited() const {return var_->visited(); }
+    void set_evaluated(bool v)  { var_->set_evaluated( v); }
+    bool evaluated() const {return var_->evaluated(); }
+    bool is_leaf() const {return var_->is_leaf(); }
+    void set_leaf(bool v) const {var_->set_leaf(v);}
+    // Member access
+    void add_input_node(const Var<T>& v){var_->add_input_node(v);}
+    // Data access
+    T v(int i = -1, int j = -1) const {
+        return var_->v(i, j);
+    }
+    const auto &grad() const {return var_->grad();}
+    void set_grad(const TMat<T>& m) const {var_->set_grad(m);}
+    const auto &val() const {return var_->val();}
+    void set_val(const TMat<T>& m) const {var_->set_val(m);}
+    T g(int i = -1, int j = -1) const {return var_->g(i,j);}
+    void set_fn(std::unique_ptr<EvalGradFunctionBase<T>>&& v) const {var_->set_fn(std::move(v));}
+    std::unique_ptr<EvalGradFunctionBase<T>>& fn() const {return var_->fn();}
+    //grad
+    const TMap<T> & eval() const {return var_->eval();}
+    void backward() const {var_->backward();}
+    void backward(const TMat<T> &seed) const {var_->backward(seed);}
+    const TMap<T> &evalb() const {return var_->evalb();}
+    void zero_grad()const {var_->zero_grad();}
+
+    // Iterator
+    const T *cvbegin() const { return var_->cvbegin(); }
+    const T *cvend() const { return var_->cvend(); };
+    T *vbegin() { return var_->vbegin(); };
+    T *vend() { return var_->vend(); };
+    const T *cgbegin() const { return var_->cgbegin(); };
+    const T *cgend() const { return var_->cgend(); };
+    T *gbegin() { return var_->gbegin(); };
+    T *gend() { return var_->gend(); };
+protected:
+    std::shared_ptr<VarImpl<T>> var_;
+};
+
 //----------------------------------------------------------------------------------------------------------
-// Convinient function for initializing variables.
+// Convinient function for initializing VarImpliables.
 template <typename T = double>
-inline std::shared_ptr<Var<T>> sca(const T &v, bool requires_grad = false) {
-    auto res = std::make_shared<Var<T>>(1, 1, requires_grad);
+inline Var<T> sca(const T &v, bool requires_grad = false) {
+    auto res = std::make_shared<VarImpl<T>>(1, 1, requires_grad);
     *res = {v};
     return res;
 };
 // p for parameter.
-template <typename T = double> inline std::shared_ptr<Var<T>> psca(T v = 0.0) {
+template <typename T = double> inline Var<T> psca(T v = 0.0) {
     return sca<T>(v, true);
 };
 // c for constant
-template <typename T = double> inline std::shared_ptr<Var<T>> csca(T v = 0.0) {
+template <typename T = double> inline Var<T> csca(T v = 0.0) {
     return sca<T>(v, false);
 };
 template <std::floating_point T = double>
-std::shared_ptr<Var<T>> mat(std::initializer_list<T> v, int rows, int cols,
+Var<T> mat(std::initializer_list<T> v, int rows, int cols,
                             bool requires_grad = false) {
-    auto res = std::make_shared<Var<T>>(rows, cols, requires_grad);
+    auto res = std::make_shared<VarImpl<T>>(rows, cols, requires_grad);
     *res = v;
     return res;
 };
 template <std::floating_point T = double>
-std::shared_ptr<Var<T>> mat(const TMat<T> &m, bool requires_grad = false) {
-    auto res = std::make_shared<Var<T>>(m.rows(), m.cols(), requires_grad);
+Var<T> mat(const TMat<T> &m, bool requires_grad = false) {
+    auto res = std::make_shared<VarImpl<T>>(m.rows(), m.cols(), requires_grad);
     *res = m;
     return res;
 };
 // p for parameter.
-template <typename T = double> inline std::shared_ptr<Var<T>> pmat(int rows, int cols) {
-    return std::make_shared<Var<T>>(rows, cols, true);
+template <typename T = double> inline Var<T> pmat(int rows, int cols) {
+    return std::make_shared<VarImpl<T>>(rows, cols, true);
 };
 // p for parameter.
 template <typename T = double>
-inline std::shared_ptr<Var<T>> pmat(std::initializer_list<T> v, int rows, int cols) {
+inline Var<T> pmat(std::initializer_list<T> v, int rows, int cols) {
     assert((v.size() == rows * cols) && "Data size is not equal to rows*cols");
-    auto res = std::make_shared<Var<T>>(rows, cols, true);
+    auto res = std::make_shared<VarImpl<T>>(rows, cols, true);
     *res = v;
     return res;
 };
 // c for constant
-template <typename T = double> inline std::shared_ptr<Var<T>> cmat(int rows, int cols) {
-    return std::make_shared<Var<T>>(rows, cols, false);
+template <typename T = double> inline Var<T> cmat(int rows, int cols) {
+    return std::make_shared<VarImpl<T>>(rows, cols, false);
 };
 template <typename T = double>
-std::shared_ptr<Var<T>> mat(int rows, int cols, bool requires_grad = false) {
-    auto res = std::make_shared<Var<T>>(rows, cols, requires_grad);
+Var<T> mat(int rows, int cols, bool requires_grad = false) {
+    auto res = std::make_shared<VarImpl<T>>(rows, cols, requires_grad);
     return res;
 };
 template <typename T = double>
-std::shared_ptr<Var<T>> rowvec(std::initializer_list<T> v, bool requires_grad = false) {
-    auto res = std::make_shared<Var<T>>(1, v.size(), requires_grad);
+Var<T> rowvec(std::initializer_list<T> v, bool requires_grad = false) {
+    auto res = std::make_shared<VarImpl<T>>(1, v.size(), requires_grad);
     *res = v;
     return res;
 };
-template <typename T = double> std::shared_ptr<Var<T>> prowvec(std::initializer_list<T> v) {
-    auto res = std::make_shared<Var<T>>(1, v.size(), true);
+template <typename T = double> Var<T> prowvec(std::initializer_list<T> v) {
+    auto res = std::make_shared<VarImpl<T>>(1, v.size(), true);
     *res = v;
     return res;
 };
 template <std::floating_point T = double>
-inline std::shared_ptr<Var<T>> vec(std::initializer_list<T> v, bool requires_grad = false) {
-    auto res = std::make_shared<Var<T>>(v.size(), 1, requires_grad);
+inline Var<T> vec(std::initializer_list<T> v, bool requires_grad = false) {
+    auto res = std::make_shared<VarImpl<T>>(v.size(), 1, requires_grad);
     *res = v;
     return res;
 };
 template <std::floating_point T = double>
-inline std::shared_ptr<Var<T>> vec(int n, bool requires_grad = false) {
-    auto res = std::make_shared<Var<T>>(n, 1, requires_grad);
+inline Var<T> vec(int n, bool requires_grad = false) {
+    auto res = std::make_shared<VarImpl<T>>(n, 1, requires_grad);
+    return res;
+}
+/**
+ * pvec: parameter vector
+ * cvec: constant vector
+ **/
+template <typename T = double> inline Var<T> pvec(int n) {
+    auto res = std::make_shared<VarImpl<T>>(n, 1, true);
     return res;
 };
-template <typename T = double> inline std::shared_ptr<Var<T>> pvec(int n) {
-    auto res = std::make_shared<Var<T>>(n, 1, true);
-    return res;
-};
-template <typename T = double> inline std::shared_ptr<Var<T>> pvec(std::initializer_list<T> v) {
-    auto res = std::make_shared<Var<T>>(v.size(), 1, true);
+template <typename T = double> inline Var<T> pvec(std::initializer_list<T> v) {
+    auto res = std::make_shared<VarImpl<T>>(v.size(), 1, true);
     *res = v;
     return res;
 };
-template <typename T = double> inline std::shared_ptr<Var<T>> cvec(std::initializer_list<T> v) {
-    auto res = std::make_shared<Var<T>>(v.size(), 1, false);
+template <typename T = double> inline Var<T> cvec(std::initializer_list<T> v) {
+    auto res = std::make_shared<VarImpl<T>>(v.size(), 1, false);
     *res = v;
     return res;
 };
 template <typename T = double>
-void bind_seq(T *v, T *g, std::initializer_list<std::shared_ptr<Var<T>>> vars) {
+void bind_seq(T *v, T *g, std::initializer_list<Var<T>> VarImpls) {
     int vi = 0, gi = 0;
-    for (auto &var : vars) {
-        var->bind(v + vi, g + gi);
-        vi += var->size();
-        gi += (var->requires_grad()) * var->size();
+    for (auto &VarImpl : VarImpls) {
+        VarImpl->bind(v + vi, g + gi);
+        vi += VarImpl.size();
+        gi += (VarImpl.requires_grad()) * VarImpl.size();
     };
 };
 template <typename T = double> auto load(const std::string &file, bool requires_grad = false) {
-    return std::make_shared<Var<T>>(file, requires_grad);
+    return std::make_shared<VarImpl<T>>(file, requires_grad);
 }
 //-------------------------------------------------------------------------------------------------------------
 // Arithmetic
-// template <typename T = double> class Var { std::shared_ptr<Var<T>> _impl; };
+// template <typename T = double> class VarImpl { Var<T> _impl; };
 // negation
 template <typename T> struct NegationEvalGrad : EvalGradFunctionBase<T> {
     std::string get_name() const override { return "NegationEvalGrad"; };
@@ -450,14 +549,14 @@ template <typename T> struct NegationEvalGrad : EvalGradFunctionBase<T> {
         return res;
     };
     void eval(TMap<T> &dest, const std::vector<TMap<T>> &inputs) override { dest = -inputs[0]; };
-    std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) override {
-        return {-current->grad().array()};
+    std::vector<TMat<T>> grad(const Var<T> &current) override {
+        return {-current.grad().array()};
     };
 };
 
-template <typename T> std::shared_ptr<Var<T>> operator-(const std::shared_ptr<Var<T>> &operand) {
-    std::vector<std::shared_ptr<Var<T>>> input_nodes{operand};
-    return std::make_shared<Var<T>>(operand->rows(), operand->cols(), (operand->requires_grad()),
+template <typename T> Var<T> operator-(const Var<T> &operand) {
+    std::vector<Var<T>> input_nodes{operand};
+    return std::make_shared<VarImpl<T>>(operand.rows(), operand.cols(), (operand.requires_grad()),
                                     input_nodes, std::make_unique<NegationEvalGrad<T>>());
 };
 // + - * /
@@ -482,88 +581,88 @@ template <typename T> std::shared_ptr<Var<T>> operator-(const std::shared_ptr<Va
                 dest = eval_op;                                                                    \
             }                                                                                      \
         };                                                                                         \
-        std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) override {               \
+        std::vector<TMat<T>> grad(const Var<T> &current) override {               \
             std::vector<TMat<T>> res(2);                                                           \
-            const auto &G = current->grad();                                                       \
-            const auto &L = current->input_node(0)->val();                                         \
-            const auto &R = current->input_node(1)->val();                                         \
-            if (current->input_size(0) == 1) {                                                     \
-                if (current->input_node(0)->requires_grad())                                       \
+            const auto &G = current.grad();                                                       \
+            const auto &L = current.input_node(0).val();                                         \
+            const auto &R = current.input_node(1).val();                                         \
+            if (current.input_size(0) == 1) {                                                     \
+                if (current.input_node(0).requires_grad())                                       \
                     res[0] = backward_operation_lhs1_0;                                            \
-                if (current->input_node(1)->requires_grad())                                       \
+                if (current.input_node(1).requires_grad())                                       \
                     res[1] = backward_operation_lhs1_1;                                            \
-            } else if (current->input_size(1) == 1) {                                              \
-                if (current->input_node(0)->requires_grad())                                       \
+            } else if (current.input_size(1) == 1) {                                              \
+                if (current.input_node(0).requires_grad())                                       \
                     res[0] = backward_operation_rhs1_0;                                            \
-                if (current->input_node(1)->requires_grad())                                       \
+                if (current.input_node(1).requires_grad())                                       \
                     res[1] = backward_operation_rhs1_1;                                            \
             } else {                                                                               \
-                if (current->input_node(0)->requires_grad())                                       \
+                if (current.input_node(0).requires_grad())                                       \
                     res[0] = backward_operation_0;                                                 \
-                if (current->input_node(1)->requires_grad())                                       \
+                if (current.input_node(1).requires_grad())                                       \
                     res[1] = backward_operation_1;                                                 \
             };                                                                                     \
             return res;                                                                            \
         };                                                                                         \
     };                                                                                             \
     template <typename T>                                                                          \
-    std::shared_ptr<Var<T>> operator sym(const std::shared_ptr<Var<T>> &lhs,                       \
-                                         const std::shared_ptr<Var<T>> &rhs) {                     \
+    Var<T> operator sym(const Var<T> &lhs,                       \
+                                         const Var<T> &rhs) {                     \
         assert((assert_cond) && assert_message);                                                   \
-        std::vector<std::shared_ptr<Var<T>>> input_nodes{lhs, rhs};                                \
-        auto res = std::make_shared<Var<T>>(result_rows, result_cols,                              \
-                                            (lhs->requires_grad() || rhs->requires_grad()),        \
+        std::vector<Var<T>> input_nodes{lhs, rhs};                                \
+        auto res = std::make_shared<VarImpl<T>>(result_rows, result_cols,                              \
+                                            (lhs.requires_grad() || rhs.requires_grad()),        \
                                             input_nodes, std::make_unique<name##EvalGrad<T>>());   \
         return res;                                                                                \
     };                                                                                             \
     template <typename T, typename ST>                                                             \
-    std::shared_ptr<Var<T>> operator sym(const std::shared_ptr<Var<T>> &lhs, const ST &scav) {     \
+    Var<T> operator sym(const Var<T> &lhs, const ST &scav) {     \
         auto rhs = sca(static_cast<T>(scav));                                                      \
         return lhs sym rhs;                                                                        \
     };                                                                                             \
     template <typename T, typename ST>                                                             \
-    std::shared_ptr<Var<T>> operator sym(const ST &scav, const std::shared_ptr<Var<T>> &rhs) {     \
+    Var<T> operator sym(const ST &scav, const Var<T> &rhs) {     \
         auto lhs = sca(static_cast<T>(scav));                                                      \
         return lhs sym rhs;                                                                        \
     };
 
 // Plus
 BINARYARITHOP(
-    +, Plus, inputs[0].array() + inputs[1].array(), UNWRAP(std::max(lhs->rows(), rhs->rows())),
-    UNWRAP(std::max(lhs->cols(), rhs->cols())), UNWRAP(eigen_scalar_mat(T(current->grad().sum()))),
-    UNWRAP(current->grad()), UNWRAP(current->grad()),
-    UNWRAP(eigen_scalar_mat(T(current->grad().sum()))), UNWRAP(current->grad()),
-    UNWRAP(current->grad()), shape_match(lhs, rhs) || (lhs->size() == 1) || (rhs->size() == 1),
+    +, Plus, inputs[0].array() + inputs[1].array(), UNWRAP(std::max(lhs.rows(), rhs.rows())),
+    UNWRAP(std::max(lhs.cols(), rhs.cols())), UNWRAP(eigen_scalar_mat(T(current.grad().sum()))),
+    UNWRAP(current.grad()), UNWRAP(current.grad()),
+    UNWRAP(eigen_scalar_mat(T(current.grad().sum()))), UNWRAP(current.grad()),
+    UNWRAP(current.grad()), shape_match(lhs, rhs) || (lhs.size() == 1) || (rhs.size() == 1),
     "Mat shape must be equal for + operator or at least one of them is actually a scalar.")
 // minus
 BINARYARITHOP(
-    -, Minus, inputs[0].array() - inputs[1].array(), UNWRAP(std::max(lhs->rows(), rhs->rows())),
-    UNWRAP(std::max(lhs->cols(), rhs->cols())), UNWRAP(eigen_scalar_mat(T(current->grad().sum()))),
-    UNWRAP(-current->grad()), UNWRAP(current->grad()),
-    UNWRAP(eigen_scalar_mat(-T(current->grad().sum()))), UNWRAP(current->grad()),
-    UNWRAP(-current->grad()), shape_match(lhs, rhs) || (lhs->size() == 1) || (rhs->size() == 1),
+    -, Minus, inputs[0].array() - inputs[1].array(), UNWRAP(std::max(lhs.rows(), rhs.rows())),
+    UNWRAP(std::max(lhs.cols(), rhs.cols())), UNWRAP(eigen_scalar_mat(T(current.grad().sum()))),
+    UNWRAP(-current.grad()), UNWRAP(current.grad()),
+    UNWRAP(eigen_scalar_mat(-T(current.grad().sum()))), UNWRAP(current.grad()),
+    UNWRAP(-current.grad()), shape_match(lhs, rhs) || (lhs.size() == 1) || (rhs.size() == 1),
     "Mat shape must be equal for - operator or at least one of them is actually a scalar.")
 // times: matrix product.
 BINARYARITHOP(
         *, Times, inputs[0] * inputs[1],
-        UNWRAP(_matmul_result_rows(lhs->rows(), lhs->cols(), rhs->rows(), rhs->cols())),
-        UNWRAP(_matmul_result_cols(lhs->rows(), lhs->cols(), rhs->rows(), rhs->cols())),
+        UNWRAP(_matmul_result_rows(lhs.rows(), lhs.cols(), rhs.rows(), rhs.cols())),
+        UNWRAP(_matmul_result_cols(lhs.rows(), lhs.cols(), rhs.rows(), rhs.cols())),
         UNWRAP(eigen_scalar_mat(T((G.array() * R.array()).sum()))), UNWRAP(G *L.coeff(0, 0)),
         UNWRAP(G *R.coeff(0, 0)), UNWRAP(eigen_scalar_mat(T((G.array() * L.array()).sum()))),
         UNWRAP(G *R.transpose()), UNWRAP(L.transpose() * G),
-        (lhs->cols() == rhs->rows()) || (lhs->size() == 1) || (rhs->size() == 1),
+        (lhs.cols() == rhs.rows()) || (lhs.size() == 1) || (rhs.size() == 1),
         UNWRAP(
             "Cols of left matrix should be equal to rows of the right matrix for matrix "
             "multiplication operator * or at least one of them is actually a scalar. Shapes are: "))
 // division
 BINARYARITHOP(
-    /, Division, inputs[0].array() + inputs[1].array(), UNWRAP(std::max(lhs->rows(), rhs->rows())),
-    UNWRAP(std::max(lhs->cols(), rhs->cols())),
+    /, Division, inputs[0].array() + inputs[1].array(), UNWRAP(std::max(lhs.rows(), rhs.rows())),
+    UNWRAP(std::max(lhs.cols(), rhs.cols())),
     UNWRAP(eigen_scalar_mat(T((G.array() / R.array()).sum()))),
     UNWRAP(-L.coeff(0, 0) * G.array() / R.array().pow(2)), UNWRAP(G.array() * R.coeff(0, 0)),
     UNWRAP(eigen_scalar_mat(-T((G.array() * L.array()).sum()) / std::pow(R.coeff(0, 0), 2))),
     UNWRAP(G.array() / R.array()), UNWRAP(-G.array() * L.array() / R.array().pow(2)),
-    shape_match(lhs, rhs) || (lhs->size() == 1) || (rhs->size() == 1),
+    shape_match(lhs, rhs) || (lhs.size() == 1) || (rhs.size() == 1),
     "Mat shape must be equal for elementwise division operator / or at least one of them "
     "is actually a scalar.")
 
@@ -580,19 +679,19 @@ template <typename T = double> struct Eprod2EvalGrad : EvalGradFunctionBase<T> {
         const auto &Y = inputs[1];
         dest = X.array() * Y.array();
     };
-    std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) {
-        const auto &X = current->input_node(0)->val();
-        const auto &Y = current->input_node(1)->val();
-        const auto &G = current->grad();
+    std::vector<TMat<T>> grad(const Var<T> &current) {
+        const auto &X = current.input_node(0).val();
+        const auto &Y = current.input_node(1).val();
+        const auto &G = current.grad();
         return {G.array() * Y.array(), G.array() * X.array()};
     };
 };
 template <typename T = double>
-std::shared_ptr<Var<T>> eprod(const std::shared_ptr<Var<T>> &X, const std::shared_ptr<Var<T>> &Y) {
-    assert(((X->rows() == Y->rows()) && (X->cols() && Y->cols())) &&
+Var<T> eprod(const Var<T> &X, const Var<T> &Y) {
+    assert(((X.rows() == Y.rows()) && (X.cols() && Y.cols())) &&
            "A and B must have the same shape for element-wise product eprod(X, Y) operator.");
-    std::vector<std::shared_ptr<Var<T>>> input_nodes{X, Y};
-    return std::make_shared<Var<T>>(1, 1, (X->requires_grad() || Y->requires_grad()), input_nodes,
+    std::vector<Var<T>> input_nodes{X, Y};
+    return std::make_shared<VarImpl<T>>(1, 1, (X.requires_grad() || Y.requires_grad()), input_nodes,
                                     std::make_unique<Eprod2EvalGrad<T>>());
 };
 
@@ -624,10 +723,10 @@ template <typename T = double> struct OffsetEvalGrad : EvalGradFunctionBase<T> {
             throw std::range_error("Shape mismatch for operator offset(X, x).");
         }
     };
-    std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) {
-        const auto &X = current->input_node(0)->val();
-        const auto &x = current->input_node(1)->val();
-        const auto &Ga = current->grad().array();
+    std::vector<TMat<T>> grad(const Var<T> &current) {
+        const auto &X = current.input_node(0).val();
+        const auto &x = current.input_node(1).val();
+        const auto &Ga = current.grad().array();
         if (D == 0) {
             // x is a row-vector
             return {Ga, Ga.colwise().sum()};
@@ -637,20 +736,20 @@ template <typename T = double> struct OffsetEvalGrad : EvalGradFunctionBase<T> {
     };
 };
 template <typename T = double>
-std::shared_ptr<Var<T>> offset(const std::shared_ptr<Var<T>> &X, const std::shared_ptr<Var<T>> &x) {
-    assert((((x->cols() == 1) && (X->rows() == x->rows())) ||
-            ((x->rows() == 1) && (X->cols() == x->cols()))) &&
+Var<T> offset(const Var<T> &X, const Var<T> &x) {
+    assert((((x.cols() == 1) && (X.rows() == x.rows())) ||
+            ((x.rows() == 1) && (X.cols() == x.cols()))) &&
            "Please check shape of input to offset(X, x), X must be a matrix. x is a row of column "
            "vector.");
-    if ((x->cols() == 1) && (X->rows() == x->rows())) {
-        std::vector<std::shared_ptr<Var<T>>> input_nodes{X, x};
-        return std::make_shared<Var<T>>(X->rows(), X->cols(),
-                                        (X->requires_grad() || x->requires_grad()), input_nodes,
+    if ((x.cols() == 1) && (X.rows() == x.rows())) {
+        std::vector<Var<T>> input_nodes{X, x};
+        return std::make_shared<VarImpl<T>>(X.rows(), X.cols(),
+                                        (X.requires_grad() || x.requires_grad()), input_nodes,
                                         std::make_unique<OffsetEvalGrad<T>>(1));
-    } else if ((x->rows() == 1) && (X->cols() == x->cols())) {
-        std::vector<std::shared_ptr<Var<T>>> input_nodes{X, x};
-        return std::make_shared<Var<T>>(X->rows(), X->cols(),
-                                        (X->requires_grad() || x->requires_grad()), input_nodes,
+    } else if ((x.rows() == 1) && (X.cols() == x.cols())) {
+        std::vector<Var<T>> input_nodes{X, x};
+        return std::make_shared<VarImpl<T>>(X.rows(), X.cols(),
+                                        (X.requires_grad() || x.requires_grad()), input_nodes,
                                         std::make_unique<OffsetEvalGrad<T>>(0));
     } else {
         throw std::range_error("Shape mismatch for offsex(X, x).");
@@ -660,7 +759,7 @@ std::shared_ptr<Var<T>> offset(const std::shared_ptr<Var<T>> &X, const std::shar
 //-------------------------------------------------------------------------------------------------------------
 // Unary functions
 #define UNARYFUNCTION(functionname, structname, rows, cols, evalop, gradop, datamember, funargs,   \
-                      funvar, evalextra, gradextra, assertstmt, constructorarg, constructorinit,   \
+                      funVarImpl, evalextra, gradextra, assertstmt, constructorarg, constructorinit,   \
                       to_json_exp)                                                                 \
     template <typename T = double> struct structname##EvalGrad : EvalGradFunctionBase<T> {         \
         std::string get_name() const override { return STRING(structname##EvalGrad); };            \
@@ -674,85 +773,85 @@ std::shared_ptr<Var<T>> offset(const std::shared_ptr<Var<T>> &X, const std::shar
             const auto &A = inputs[0];                                                             \
             evalop                                                                                 \
         };                                                                                         \
-        std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) override {               \
-            const auto &A = current->input_node(0)->val();                                         \
-            const auto &G = current->grad();                                                       \
-            const auto &Ga = current->grad().array();                                              \
+        std::vector<TMat<T>> grad(const Var<T> &current) override {               \
+            const auto &A = current.input_node(0).val();                                         \
+            const auto &G = current.grad();                                                       \
+            const auto &Ga = current.grad().array();                                              \
             gradop                                                                                 \
         };                                                                                         \
     };                                                                                             \
     template <typename T>                                                                          \
-    std::shared_ptr<Var<T>> functionname(const std::shared_ptr<Var<T>> &operand funargs) {         \
-        assertstmt std::vector<std::shared_ptr<Var<T>>> input_nodes{operand};                      \
-        return std::make_shared<Var<T>>(rows, cols, (operand->requires_grad()), input_nodes,       \
-                                        std::make_unique<structname##EvalGrad<T>>(funvar));        \
+    Var<T> functionname(const Var<T> &operand funargs) {         \
+        assertstmt std::vector<Var<T>> input_nodes{operand};                      \
+        return {std::make_shared<VarImpl<T>>(rows, cols, (operand.requires_grad()), input_nodes,       \
+                                        std::make_unique<structname##EvalGrad<T>>(funVarImpl))};        \
     };
-UNARYFUNCTION(exp, Exp, operand->rows(), operand->cols(), UNWRAP(dest = A.array().exp();),
-              UNWRAP(return {Ga * current->val().array()};), , , , , , , , , )
-UNARYFUNCTION(ln, Ln, operand->rows(), operand->cols(), UNWRAP(dest = A.array().log();),
+UNARYFUNCTION(exp, Exp, operand.rows(), operand.cols(), UNWRAP(dest = A.array().exp();),
+              UNWRAP(return {Ga * current.val().array()};), , , , , , , , , )
+UNARYFUNCTION(ln, Ln, operand.rows(), operand.cols(), UNWRAP(dest = A.array().log();),
               UNWRAP(return {Ga / A.array()};), , , , , , , , , )
-UNARYFUNCTION(sin, Sin, operand->rows(), operand->cols(), UNWRAP(dest = A.array().sin();),
+UNARYFUNCTION(sin, Sin, operand.rows(), operand.cols(), UNWRAP(dest = A.array().sin();),
               UNWRAP(return {Ga * A.array().cos()};), , , , , , , , , )
-UNARYFUNCTION(cos, Cos, operand->rows(), operand->cols(), UNWRAP(dest = A.array().cos();),
+UNARYFUNCTION(cos, Cos, operand.rows(), operand.cols(), UNWRAP(dest = A.array().cos();),
               UNWRAP(return {-Ga * A.array().sin()};), , , , , , , , , )
-UNARYFUNCTION(tan, Tan, operand->rows(), operand->cols(), UNWRAP(dest = A.array().tan();),
+UNARYFUNCTION(tan, Tan, operand.rows(), operand.cols(), UNWRAP(dest = A.array().tan();),
               UNWRAP(return {Ga / A.array().cos().pow(2)};), , , , , , , , , )
-UNARYFUNCTION(sinh, Sinh, operand->rows(), operand->cols(), UNWRAP(dest = A.array().sinh();),
+UNARYFUNCTION(sinh, Sinh, operand.rows(), operand.cols(), UNWRAP(dest = A.array().sinh();),
               UNWRAP(return {Ga * A.array().cosh()};), , , , , , , , , )
-UNARYFUNCTION(cosh, Cosh, operand->rows(), operand->cols(), UNWRAP(dest = A.array().cosh();),
+UNARYFUNCTION(cosh, Cosh, operand.rows(), operand.cols(), UNWRAP(dest = A.array().cosh();),
               UNWRAP(return {Ga * A.array().sinh()};), , , , , , , , , )
-UNARYFUNCTION(tanh, Tanh, operand->rows(), operand->cols(), UNWRAP(dest = A.array().tanh();),
+UNARYFUNCTION(tanh, Tanh, operand.rows(), operand.cols(), UNWRAP(dest = A.array().tanh();),
               UNWRAP(return {Ga / A.array().cosh().pow(2)};), , , , , , , , , )
-UNARYFUNCTION(sigmoid, Sigmoid, operand->rows(), operand->cols(),
+UNARYFUNCTION(sigmoid, Sigmoid, operand.rows(), operand.cols(),
               UNWRAP(dest = 1.0 / (1 + (-A.array()).exp());),
               UNWRAP(auto maexp = (-A.array()).exp(); return {Ga * maexp / (1 + maexp).pow(2)};), ,
               , , , , , , , )
-UNARYFUNCTION(relu, ReLU, operand->rows(), operand->cols(),
+UNARYFUNCTION(relu, ReLU, operand.rows(), operand.cols(),
               UNWRAP(dest = A.unaryExpr([](T x) -> T { return x > 0 ? x : 0; });),
               UNWRAP(return {Ga *
                              A.unaryExpr([](T x) -> T { return x > 0 ? 1 : 0; }).eval().array()};),
               , , , , , , , , )
-UNARYFUNCTION(sqrt, Sqrt, operand->rows(), operand->cols(), UNWRAP(dest = A.array().sqrt();),
-              UNWRAP(return {0.5 * Ga * current->val().array() / A.array()};), , , , , , , , , )
-UNARYFUNCTION(pow, Pow, operand->rows(), operand->cols(), UNWRAP(dest = A.array().pow(n);),
-              UNWRAP(return {Ga * n * current->val().array() / A.array()};), UNWRAP(int n;),
+UNARYFUNCTION(sqrt, Sqrt, operand.rows(), operand.cols(), UNWRAP(dest = A.array().sqrt();),
+              UNWRAP(return {0.5 * Ga * current.val().array() / A.array()};), , , , , , , , , )
+UNARYFUNCTION(pow, Pow, operand.rows(), operand.cols(), UNWRAP(dest = A.array().pow(n);),
+              UNWRAP(return {Ga * n * current.val().array() / A.array()};), UNWRAP(int n;),
               UNWRAP(, int n), n, , , , int n,
               UNWRAP(
                   : n(n)),
               UNWRAP(res["n"] = n;))
 
 // Matrix unary function
-UNARYFUNCTION(transpose, Transpose, operand->cols(), operand->rows(), UNWRAP(dest = A.transpose();),
+UNARYFUNCTION(transpose, Transpose, operand.cols(), operand.rows(), UNWRAP(dest = A.transpose();),
               UNWRAP(return {G.transpose()};), , , , , , , , , )
 // Self multiplication: A*A^T
-UNARYFUNCTION(lsdot, LSdot, operand->rows(), operand->rows(), UNWRAP(dest = A * A.transpose();),
+UNARYFUNCTION(lsdot, LSdot, operand.rows(), operand.rows(), UNWRAP(dest = A * A.transpose();),
               UNWRAP(return {2 * G * A};), , , , , , , , , )
 // Self multiplication: A^T*A
-UNARYFUNCTION(rsdot, RSdot, operand->cols(), operand->cols(), UNWRAP(dest = A.transpose() * A;),
+UNARYFUNCTION(rsdot, RSdot, operand.cols(), operand.cols(), UNWRAP(dest = A.transpose() * A;),
               UNWRAP(return {2 * A * G};), , , , , , , , , )
 // det
 UNARYFUNCTION(det, Det, 1, 1, UNWRAP(dest.coeffRef(0, 0) = A.determinant();),
-              UNWRAP(return {G.coeff(0, 0) * current->val().coeff(0, 0) *
+              UNWRAP(return {G.coeff(0, 0) * current.val().coeff(0, 0) *
                              A.inverse().transpose()};),
               , , , , ,
-              UNWRAP(assert((operand->rows() == operand->cols()) &&
+              UNWRAP(assert((operand.rows() == operand.cols()) &&
                             "Input should be a square matrix for det.");),
               , , )
 // logdet
 UNARYFUNCTION(logdet, LogDet, 1, 1, UNWRAP(dest.coeffRef(0, 0) = std::log(T(A.determinant()));),
               UNWRAP(return {G.coeff(0, 0) * A.inverse().transpose()};), , , , , ,
-              UNWRAP(assert((operand->rows() == operand->cols()) &&
+              UNWRAP(assert((operand.rows() == operand.cols()) &&
                             "Input should be a square matrix for logdet.");),
               , , )
 // inv
-UNARYFUNCTION(inv, Inv, operand->rows(), operand->rows(), UNWRAP(dest = A.inverse();),
-              UNWRAP(return {-(current->val() * G * current->val())};), , , , , ,
-              UNWRAP(assert((operand->rows() == operand->cols()) &&
+UNARYFUNCTION(inv, Inv, operand.rows(), operand.rows(), UNWRAP(dest = A.inverse();),
+              UNWRAP(return {-(current.val() * G * current.val())};), , , , , ,
+              UNWRAP(assert((operand.rows() == operand.cols()) &&
                             "Input should be a square matrix for logdet.");),
               , , )
 // ivech
 static inline auto _s_size(int n) { return (-1 + std::sqrt(1 + 8 * n)) / 2; };
-UNARYFUNCTION(ivech, IVech, _s_size(operand->size()), _s_size(operand->size()),
+UNARYFUNCTION(ivech, IVech, _s_size(operand.size()), _s_size(operand.size()),
               UNWRAP(
                   int n = dest.rows();
                   auto f = [n](int i, int j) -> int { return (2 * n - i + 1) * i / 2 + j - i; };
@@ -773,12 +872,12 @@ UNARYFUNCTION(ivech, IVech, _s_size(operand->size()), _s_size(operand->size()),
                       }
                   } return {res};),
               , , , , ,
-              UNWRAP(assert((((operand->rows() == 1) || (operand->cols() == 1)) &&
-                             _s_size(operand->size()) == std::trunc(_s_size(operand->size()))) &&
+              UNWRAP(assert((((operand.rows() == 1) || (operand.cols() == 1)) &&
+                             _s_size(operand.size()) == std::trunc(_s_size(operand.size()))) &&
                             "Input should be a vector, and the size must be appropriate for lower "
                             "part of a square matrix.");),
               , , )
-UNARYFUNCTION(ivecl, IVecl, _s_size(operand->size()), _s_size(operand->size()),
+UNARYFUNCTION(ivecl, IVecl, _s_size(operand.size()), _s_size(operand.size()),
               UNWRAP(
                   int n = dest.rows();
                   auto f = [n](int i, int j) -> int { return (2 * n - i + 1) * i / 2 + j - i; };
@@ -799,12 +898,12 @@ UNARYFUNCTION(ivecl, IVecl, _s_size(operand->size()), _s_size(operand->size()),
                       }
                   } return {res};),
               , , , , ,
-              UNWRAP(assert((((operand->rows() == 1) || (operand->cols() == 1)) &&
-                             _s_size(operand->size()) == std::trunc(_s_size(operand->size()))) &&
+              UNWRAP(assert((((operand.rows() == 1) || (operand.cols() == 1)) &&
+                             _s_size(operand.size()) == std::trunc(_s_size(operand.size()))) &&
                             "Input should be a vector, and the size must be appropriate for lower "
                             "part of a square matrix.");),
               , , )
-UNARYFUNCTION(ivecu, IVecu, _s_size(operand->size()), _s_size(operand->size()),
+UNARYFUNCTION(ivecu, IVecu, _s_size(operand.size()), _s_size(operand.size()),
               UNWRAP(
                   int n = dest.rows();
                   auto f = [n](int i, int j) -> int { return (2 * n - i + 1) * i / 2 + j - i; };
@@ -825,8 +924,8 @@ UNARYFUNCTION(ivecu, IVecu, _s_size(operand->size()), _s_size(operand->size()),
                       }
                   } return {res};),
               , , , , ,
-              UNWRAP(assert((((operand->rows() == 1) || (operand->cols() == 1)) &&
-                             _s_size(operand->size()) == std::trunc(_s_size(operand->size()))) &&
+              UNWRAP(assert((((operand.rows() == 1) || (operand.cols() == 1)) &&
+                             _s_size(operand.size()) == std::trunc(_s_size(operand.size()))) &&
                             "Input should be a vector, and the size must be appropriate for lower "
                             "part of a square matrix.");),
               , , )
@@ -869,8 +968,8 @@ template <typename T = double> struct CatEvalGrad : EvalGradFunctionBase<T> {
                                         std::to_string(D));
         }
     };
-    std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) {
-        const auto &G = current->grad();
+    std::vector<TMat<T>> grad(const Var<T> &current) {
+        const auto &G = current.grad();
         std::vector<TMat<T>> res(n);
 
         if (D == 0) {
@@ -891,35 +990,35 @@ template <typename T = double> struct CatEvalGrad : EvalGradFunctionBase<T> {
 
 // D=0: row, D=1: col.
 template <int D = 0, typename T = double>
-std::shared_ptr<Var<T>> cat(const std::vector<std::shared_ptr<Var<T>>> &x) {
+Var<T> cat(const std::vector<Var<T>> &x) {
 
     int N = x.size();
     // requires_grad
     bool requires_grad = false;
     for (auto &node : x) {
-        requires_grad = requires_grad || node->requires_grad();
+        requires_grad = requires_grad || node.requires_grad();
     }
 
     int rows, cols;
     // check size
     if constexpr (D == 0) {
         rows = 0;
-        cols = x[0]->cols();
+        cols = x[0].cols();
         for (int i = 0; i < N; ++i) {
-            if (x[i]->cols() != cols)
+            if (x[i].cols() != cols)
                 throw std::runtime_error("Columns of each element should be equal in cat<0>(x).");
             else {
-                rows += x[i]->rows();
+                rows += x[i].rows();
             }
         }
     } else if constexpr (D == 1) {
-        rows = x[0]->rows();
+        rows = x[0].rows();
         cols = 0;
         for (int i = 0; i < N; ++i) {
-            if (x[i]->rows() != rows)
+            if (x[i].rows() != rows)
                 throw std::runtime_error("Rows of each element should be equal in cat<1>(x).");
             else {
-                cols += x[i]->cols();
+                cols += x[i].cols();
             }
         }
     } else {
@@ -928,13 +1027,13 @@ std::shared_ptr<Var<T>> cat(const std::vector<std::shared_ptr<Var<T>>> &x) {
                                     std::to_string(D));
     }
 
-    return std::make_shared<Var<T>>(rows, cols, requires_grad, x,
+    return std::make_shared<VarImpl<T>>(rows, cols, requires_grad, x,
                                     std::make_unique<CatEvalGrad<T>>(D));
 };
 
 template <int D = 0, typename T = double>
-std::shared_ptr<Var<T>> cat(std::initializer_list<std::shared_ptr<Var<T>>> &x) {
-    std::vector<std::shared_ptr<Var<T>>> xv = x;
+Var<T> cat(std::initializer_list<Var<T>> &x) {
+    std::vector<Var<T>> xv = x;
     return cat(xv);
 };
 // norm. D: dim, 0(all), 1(row, norm of each row, get a row vector ), 2(col)
@@ -981,16 +1080,16 @@ template <typename T = double> struct LpNormEvalGrad : EvalGradFunctionBase<T> {
             }
         }
     };
-    std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) {
-        const auto &arr = current->input_node(0)->val().array();
-        const auto &G = current->grad();
+    std::vector<TMat<T>> grad(const Var<T> &current) {
+        const auto &arr = current.input_node(0).val().array();
+        const auto &G = current.grad();
         if (D == 0) {
             if (n == 1) {
                 return {_broadcasting_mul(G, arr.unaryExpr(&sign<T>))};
             } else if (n < 50) {
                 TMat<T> res(arr.rows(), arr.cols());
                 for (int i = 0; i < arr.rows(); ++i) {
-                    T tmp = current->val().coeff(i, 0) / vabsn.row(i).sum();
+                    T tmp = current.val().coeff(i, 0) / vabsn.row(i).sum();
                     res.row(i) = G.coeff(i, 0) * tmp * vabsn.row(i) / vabs.row(i) *
                                  arr.row(i).unaryExpr(&sign<T>);
                 }
@@ -1011,7 +1110,7 @@ template <typename T = double> struct LpNormEvalGrad : EvalGradFunctionBase<T> {
             } else if (n < 50) {
                 TMat<T> res(arr.rows(), arr.cols());
                 for (int j = 0; j < arr.cols(); ++j) {
-                    T tmp = current->val().coeff(0, j) / vabsn.col(j).sum();
+                    T tmp = current.val().coeff(0, j) / vabsn.col(j).sum();
                     res.col(j) = G.coeff(0, j) * tmp * vabsn.col(j) / vabs.col(j) *
                                  arr.col(j).unaryExpr(&sign<T>);
                 }
@@ -1032,7 +1131,7 @@ template <typename T = double> struct LpNormEvalGrad : EvalGradFunctionBase<T> {
                 return {G.coeff(0, 0) * arr.unaryExpr(&sign<T>)};
             } else if (n < 50) {
                 TArr<T> res = G.coeff(0, 0) * vabsn / vabs * arr.unaryExpr(&sign<T>) *
-                              (current->val().coeff(0, 0) / vabsn.sum());
+                              (current.val().coeff(0, 0) / vabsn.sum());
                 return {res};
             } else {
                 TMat<T> res(arr.rows(), arr.cols());
@@ -1048,16 +1147,16 @@ template <typename T = double> struct LpNormEvalGrad : EvalGradFunctionBase<T> {
 
 // D=2 for all.
 template <int n = 2, int D = -1, typename T = double> requires requires() { n > 0; }
-std::shared_ptr<Var<T>> lpnorm(const std::shared_ptr<Var<T>> &operand) {
-    std::vector<std::shared_ptr<Var<T>>> input_nodes{operand};
+Var<T> lpnorm(const Var<T> &operand) {
+    std::vector<Var<T>> input_nodes{operand};
     if constexpr (D == 0) {
-        return std::make_shared<Var<T>>(operand->rows(), 1, (operand->requires_grad()), input_nodes,
+        return std::make_shared<VarImpl<T>>(operand.rows(), 1, (operand.requires_grad()), input_nodes,
                                         std::make_unique<LpNormEvalGrad<T>>(n, D));
     } else if constexpr (D == 1) {
-        return std::make_shared<Var<T>>(1, operand->cols(), (operand->requires_grad()), input_nodes,
+        return std::make_shared<VarImpl<T>>(1, operand.cols(), (operand.requires_grad()), input_nodes,
                                         std::make_unique<LpNormEvalGrad<T>>(n, D));
     } else {
-        return std::make_shared<Var<T>>(1, 1, (operand->requires_grad()), input_nodes,
+        return std::make_shared<VarImpl<T>>(1, 1, (operand.requires_grad()), input_nodes,
                                         std::make_unique<LpNormEvalGrad<T>>(n, D));
     };
 };
@@ -1074,16 +1173,16 @@ template <typename T = double> struct TraceEvalGrad : EvalGradFunctionBase<T> {
         const auto &X = inputs[0];
         dest.coeffRef(0, 0) = X.trace();
     };
-    std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) {
-        const auto &X = current->input_node(0)->val();
-        const auto &G = current->grad();
+    std::vector<TMat<T>> grad(const Var<T> &current) {
+        const auto &X = current.input_node(0).val();
+        const auto &G = current.grad();
         return {G.coeff(0, 0) * TMat<T>::Identity(X.rows(), X.cols())};
     };
 };
-template <typename T = double> std::shared_ptr<Var<T>> trace(const std::shared_ptr<Var<T>> &X) {
-    assert((X->cols() == X->rows()) && "A must be a square matrix for trace(X) operator.");
-    std::vector<std::shared_ptr<Var<T>>> input_nodes{X};
-    return std::make_shared<Var<T>>(1, 1, (X->requires_grad()), input_nodes,
+template <typename T = double> Var<T> trace(const Var<T> &X) {
+    assert((X.cols() == X.rows()) && "A must be a square matrix for trace(X) operator.");
+    std::vector<Var<T>> input_nodes{X};
+    return std::make_shared<VarImpl<T>>(1, 1, (X.requires_grad()), input_nodes,
                                     std::make_unique<TraceEvalGrad<T>>());
 };
 
@@ -1102,19 +1201,19 @@ template <typename T = double> struct Trace2EvalGrad : EvalGradFunctionBase<T> {
             dest.coeffRef(0, 0) += X.row(i).dot(Y.col(i));
         }
     };
-    std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) {
-        const auto &X = current->input_node(0)->val();
-        const auto &Y = current->input_node(1)->val();
-        const auto &G = current->grad();
+    std::vector<TMat<T>> grad(const Var<T> &current) {
+        const auto &X = current.input_node(0).val();
+        const auto &Y = current.input_node(1).val();
+        const auto &G = current.grad();
         return {G.coeff(0, 0) * Y.transpose(), G.coeff(0, 0) * X.transpose()};
     };
 };
 template <typename T = double>
-std::shared_ptr<Var<T>> trace(const std::shared_ptr<Var<T>> &X, const std::shared_ptr<Var<T>> &Y) {
-    assert(((X->cols() == Y->rows()) && (X->rows() == Y->cols())) &&
+Var<T> trace(const Var<T> &X, const Var<T> &Y) {
+    assert(((X.cols() == Y.rows()) && (X.rows() == Y.cols())) &&
            "X*Y must be a valid matrix product for trace(X, Y) operator.");
-    std::vector<std::shared_ptr<Var<T>>> input_nodes{X, Y};
-    return std::make_shared<Var<T>>(1, 1, (X->requires_grad() || Y->requires_grad()), input_nodes,
+    std::vector<Var<T>> input_nodes{X, Y};
+    return std::make_shared<VarImpl<T>>(1, 1, (X.requires_grad() || Y.requires_grad()), input_nodes,
                                     std::make_unique<Trace2EvalGrad<T>>());
 };
 
@@ -1130,16 +1229,16 @@ template <typename T = double> struct DiagEvalGrad : EvalGradFunctionBase<T> {
         const auto &X = inputs[0];
         dest = X.diagonal();
     };
-    std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) {
-        const auto &X = current->input_node(0)->val();
-        const auto &G = current->grad();
+    std::vector<TMat<T>> grad(const Var<T> &current) {
+        const auto &X = current.input_node(0).val();
+        const auto &G = current.grad();
         return {G.array() * TMat<T>::Identity(X.rows(), X.cols()).array()};
     };
 };
-template <typename T = double> std::shared_ptr<Var<T>> diag(const std::shared_ptr<Var<T>> &X) {
-    assert((X->cols() == X->rows()) && "X must be a square matrix for trace(X) operator.");
-    std::vector<std::shared_ptr<Var<T>>> input_nodes{X};
-    return std::make_shared<Var<T>>(X->rows(), 1, (X->requires_grad()), input_nodes,
+template <typename T = double> Var<T> diag(const Var<T> &X) {
+    assert((X.cols() == X.rows()) && "X must be a square matrix for trace(X) operator.");
+    std::vector<Var<T>> input_nodes{X};
+    return std::make_shared<VarImpl<T>>(X.rows(), 1, (X.requires_grad()), input_nodes,
                                     std::make_unique<DiagEvalGrad<T>>());
 };
 // diag(A, B): diag(A*B)
@@ -1157,19 +1256,19 @@ template <typename T = double> struct Diag2EvalGrad : EvalGradFunctionBase<T> {
             dest.coeffRef(i, 0) = X.row(i).dot(Y.col(i));
         }
     };
-    std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) {
-        const auto &X = current->input_node(0)->val();
-        const auto &Y = current->input_node(1)->val();
-        const auto &G = current->grad();
+    std::vector<TMat<T>> grad(const Var<T> &current) {
+        const auto &X = current.input_node(0).val();
+        const auto &Y = current.input_node(1).val();
+        const auto &G = current.grad();
         return {G.asDiagonal() * Y.transpose(), X.transpose() * G.asDiagonal()};
     };
 };
 template <typename T = double>
-std::shared_ptr<Var<T>> diag(const std::shared_ptr<Var<T>> &X, const std::shared_ptr<Var<T>> &Y) {
-    assert(((X->cols() == Y->rows()) && (X->rows() == Y->cols())) &&
+Var<T> diag(const Var<T> &X, const Var<T> &Y) {
+    assert(((X.cols() == Y.rows()) && (X.rows() == Y.cols())) &&
            "X*Y must be a valid matrix product for diag(X, Y) operator.");
-    std::vector<std::shared_ptr<Var<T>>> input_nodes{X, Y};
-    return std::make_shared<Var<T>>(X->rows(), 1, (X->requires_grad() || Y->requires_grad()),
+    std::vector<Var<T>> input_nodes{X, Y};
+    return std::make_shared<VarImpl<T>>(X.rows(), 1, (X.requires_grad() || Y.requires_grad()),
                                     input_nodes, std::make_unique<Diag2EvalGrad<T>>());
 };
 
@@ -1196,9 +1295,9 @@ template <typename T = double> struct SumEvalGrad : EvalGradFunctionBase<T> {
                                    ". Allowed values are -1(all), 0(row-wise sum), 1(col).");
         }
     };
-    std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) {
-        const auto &arr = current->input_node(0)->val().array();
-        const auto &G = current->grad();
+    std::vector<TMat<T>> grad(const Var<T> &current) {
+        const auto &arr = current.input_node(0).val().array();
+        const auto &G = current.grad();
         if (D == -1) {
             return {G.coeff(0, 0) * TMat<T>::Ones(arr.rows(), arr.cols())};
         } else if (D == 0) {
@@ -1214,16 +1313,16 @@ template <typename T = double> struct SumEvalGrad : EvalGradFunctionBase<T> {
 
 // D=-1: all , D=0: rowwise .
 template <int D = -1, typename T = double>
-std::shared_ptr<Var<T>> sum(const std::shared_ptr<Var<T>> &operand) {
-    std::vector<std::shared_ptr<Var<T>>> input_nodes{operand};
+Var<T> sum(const Var<T> &operand) {
+    std::vector<Var<T>> input_nodes{operand};
     if constexpr (D == 0) {
-        return std::make_shared<Var<T>>(operand->rows(), 1, (operand->requires_grad()), input_nodes,
+        return std::make_shared<VarImpl<T>>(operand.rows(), 1, (operand.requires_grad()), input_nodes,
                                         std::make_unique<SumEvalGrad<T>>(D));
     } else if constexpr (D == 1) {
-        return std::make_shared<Var<T>>(1, operand->cols(), (operand->requires_grad()), input_nodes,
+        return std::make_shared<VarImpl<T>>(1, operand.cols(), (operand.requires_grad()), input_nodes,
                                         std::make_unique<SumEvalGrad<T>>(D));
     } else {
-        return std::make_shared<Var<T>>(1, 1, (operand->requires_grad()), input_nodes,
+        return std::make_shared<VarImpl<T>>(1, 1, (operand.requires_grad()), input_nodes,
                                         std::make_unique<SumEvalGrad<T>>(D));
     };
 };
@@ -1244,23 +1343,23 @@ template <typename T = double> struct WeightedSumVVEvalGrad : EvalGradFunctionBa
             dest += inputs[i * 2] * inputs[i * 2 + 1].coeff(0, 0);
         };
     };
-    std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) {
-        const auto &arr = current->input_node(0)->val().array();
-        const auto &G = current->grad();
+    std::vector<TMat<T>> grad(const Var<T> &current) {
+        const auto &arr = current.input_node(0).val().array();
+        const auto &G = current.grad();
         std::vector<TMat<T>> res;
         for (int i = 0; i < n; ++i) {
-            res.emplace_back(G * current->input_node(2 * i + 1)->val().coeff(0, 0));
+            res.emplace_back(G * current.input_node(2 * i + 1).val().coeff(0, 0));
             res.emplace_back(
-                eigen_scalar_mat(T((G.array() * current->input_node(2 * i)->val().array()).sum())));
+                eigen_scalar_mat(T((G.array() * current.input_node(2 * i).val().array()).sum())));
         }
         return res;
     };
 };
 
 template <int D = -1, typename T = double>
-std::shared_ptr<Var<T>> sum(const std::vector<std::shared_ptr<Var<T>>> &x,
-                            const std::vector<std::shared_ptr<Var<T>>> &weights) {
-    std::vector<std::shared_ptr<Var<T>>> input_nodes;
+Var<T> sum(const std::vector<Var<T>> &x,
+                            const std::vector<Var<T>> &weights) {
+    std::vector<Var<T>> input_nodes;
     // Check size of x and weights to be equal.
     if (x.size() != weights.size()) {
         throw(std::runtime_error(
@@ -1273,31 +1372,31 @@ std::shared_ptr<Var<T>> sum(const std::vector<std::shared_ptr<Var<T>>> &x,
         input_nodes.emplace_back(weights[i]);
     }
     // Check equal size of elements of x.
-    int rows = x[0]->rows(), cols = x[0]->cols();
+    int rows = x[0].rows(), cols = x[0].cols();
     for (int i = 1; i < x.size(); ++i) {
         auto node = x[i];
-        if ((node->rows() != rows) || (node->cols() != cols)) {
+        if ((node.rows() != rows) || (node.cols() != cols)) {
             throw(std::runtime_error(
                 "Element size of x in sum(x, weights) must be equal. However size of element " +
                 std::to_string(i) + " and previous element are " +
-                _shape_str(node->rows(), node->cols(), x[i - 1]->rows(), x[i - 1]->cols()) + "."));
+                _shape_str(node.rows(), node.cols(), x[i - 1].rows(), x[i - 1].cols()) + "."));
         }
     }
     // Check weights to be scalar.
     for (int i = 0; i < weights.size(); ++i) {
         auto node = weights[i];
-        if (node->size() != 1) {
+        if (node.size() != 1) {
             throw(std::runtime_error(
                 "Element size of weights in sum(x, weights) must be 1. However it's " +
-                std::to_string(node->size()) + " for element " + std::to_string(i) + "."));
+                std::to_string(node.size()) + " for element " + std::to_string(i) + "."));
         }
     }
     // requires_grad
     bool requires_grad = false;
     for (auto &node : x) {
-        requires_grad = requires_grad || node->requires_grad();
+        requires_grad = requires_grad || node.requires_grad();
     }
-    return std::make_shared<Var<T>>(rows, cols, requires_grad, input_nodes,
+    return std::make_shared<VarImpl<T>>(rows, cols, requires_grad, input_nodes,
                                     std::make_unique<WeightedSumVVEvalGrad<T>>());
 };
 //-----------------------------------------------------------------------------
@@ -1324,9 +1423,9 @@ template <typename T = double> struct MeanEvalGrad : EvalGradFunctionBase<T> {
                                    ". Allowed values are -1(all), 0(row-wise sum), 1(col).");
         }
     };
-    std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) {
-        const auto &arr = current->input_node(0)->val().array();
-        const auto &G = current->grad();
+    std::vector<TMat<T>> grad(const Var<T> &current) {
+        const auto &arr = current.input_node(0).val().array();
+        const auto &G = current.grad();
         if (D == -1) {
             return {G.coeff(0, 0) * TMat<T>::Constant(arr.rows(), arr.cols(), 1.0 / arr.size())};
         } else if (D == 0) {
@@ -1344,16 +1443,16 @@ template <typename T = double> struct MeanEvalGrad : EvalGradFunctionBase<T> {
 
 // D=-1: all , D=0: rowwise .
 template <int D = -1, typename T = double>
-std::shared_ptr<Var<T>> mean(const std::shared_ptr<Var<T>> &operand) {
-    std::vector<std::shared_ptr<Var<T>>> input_nodes{operand};
+Var<T> mean(const Var<T> &operand) {
+    std::vector<Var<T>> input_nodes{operand};
     if constexpr (D == 0) {
-        return std::make_shared<Var<T>>(operand->rows(), 1, (operand->requires_grad()), input_nodes,
+        return std::make_shared<VarImpl<T>>(operand.rows(), 1, (operand.requires_grad()), input_nodes,
                                         std::make_unique<MeanEvalGrad<T>>(D));
     } else if constexpr (D == 1) {
-        return std::make_shared<Var<T>>(1, operand->cols(), (operand->requires_grad()), input_nodes,
+        return std::make_shared<VarImpl<T>>(1, operand.cols(), (operand.requires_grad()), input_nodes,
                                         std::make_unique<MeanEvalGrad<T>>(D));
     } else {
-        return std::make_shared<Var<T>>(1, 1, (operand->requires_grad()), input_nodes,
+        return std::make_shared<VarImpl<T>>(1, 1, (operand.requires_grad()), input_nodes,
                                         std::make_unique<MeanEvalGrad<T>>(D));
     };
 };
@@ -1385,9 +1484,9 @@ template <typename T = double> struct VarianceEvalGrad : EvalGradFunctionBase<T>
                                    ". Allowed values are -1(all), 0(row-wise sum), 1(col).");
         }
     };
-    std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) {
-        const auto &arr = current->input_node(0)->val().array();
-        const auto &G = current->grad();
+    std::vector<TMat<T>> grad(const Var<T> &current) {
+        const auto &arr = current.input_node(0).val().array();
+        const auto &G = current.grad();
 
         if (D == -1) {
             return {G.coeff(0, 0) * 2.0 / arr.size() * x_d};
@@ -1404,16 +1503,16 @@ template <typename T = double> struct VarianceEvalGrad : EvalGradFunctionBase<T>
 
 // D=-1: all , D=0: rowwise .
 template <int D = -1, typename T = double>
-std::shared_ptr<Var<T>> variance(const std::shared_ptr<Var<T>> &operand) {
-    std::vector<std::shared_ptr<Var<T>>> input_nodes{operand};
+Var<T> variance(const Var<T> &operand) {
+    std::vector<Var<T>> input_nodes{operand};
     if constexpr (D == 0) {
-        return std::make_shared<Var<T>>(operand->rows(), 1, (operand->requires_grad()), input_nodes,
+        return std::make_shared<VarImpl<T>>(operand.rows(), 1, (operand.requires_grad()), input_nodes,
                                         std::make_unique<VarianceEvalGrad<T>>(D));
     } else if constexpr (D == 1) {
-        return std::make_shared<Var<T>>(1, operand->cols(), (operand->requires_grad()), input_nodes,
+        return std::make_shared<VarImpl<T>>(1, operand.cols(), (operand.requires_grad()), input_nodes,
                                         std::make_unique<VarianceEvalGrad<T>>(D));
     } else {
-        return std::make_shared<Var<T>>(1, 1, (operand->requires_grad()), input_nodes,
+        return std::make_shared<VarImpl<T>>(1, 1, (operand.requires_grad()), input_nodes,
                                         std::make_unique<VarianceEvalGrad<T>>(D));
     };
 };
@@ -1449,23 +1548,23 @@ template <typename T = double> struct LinearEvalGrad : EvalGradFunctionBase<T> {
             throw std::range_error("b is not a scalar or a vector for linear(A,x,b).");
         }
     };
-    std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) {
-        const auto &A = current->input_node(0)->val();
-        const auto &x = current->input_node(1)->val();
-        const auto &b = current->input_node(2)->val();
-        const auto &G = current->grad();
+    std::vector<TMat<T>> grad(const Var<T> &current) {
+        const auto &A = current.input_node(0).val();
+        const auto &x = current.input_node(1).val();
+        const auto &b = current.input_node(2).val();
+        const auto &G = current.grad();
         std::vector<TMat<T>> res(3);
-        if (current->input_node(0)->requires_grad()) {
+        if (current.input_node(0).requires_grad()) {
             res[0] = G * x.transpose();
         } else {
             res[0] = TMat<T>();
         };
-        if (current->input_node(1)->requires_grad()) {
+        if (current.input_node(1).requires_grad()) {
             res[1] = A.transpose() * G;
         } else {
             res[1] = TMat<T>();
         };
-        if (current->input_node(2)->requires_grad()) {
+        if (current.input_node(2).requires_grad()) {
             if (type == 0) {
                 res[2] = eigen_scalar_mat(T(G.sum()));
             } else if (type == 1) {
@@ -1482,15 +1581,15 @@ template <typename T = double> struct LinearEvalGrad : EvalGradFunctionBase<T> {
 
 // A*x+b
 template <int D = -1, typename T = double>
-std::shared_ptr<Var<T>> linear(const std::shared_ptr<Var<T>> &A, const std::shared_ptr<Var<T>> &x,
-                               const std::shared_ptr<Var<T>> &b) {
-    assert(((A->cols() == x->rows()) &&
-            ((b->size() == 1) || ((b->rows() == 1) && (b->cols() == x->cols())) ||
-             ((b->cols() == 1) && (A->rows() == b->rows())))) &&
+Var<T> linear(const Var<T> &A, const Var<T> &x,
+                               const Var<T> &b) {
+    assert(((A.cols() == x.rows()) &&
+            ((b.size() == 1) || ((b.rows() == 1) && (b.cols() == x.cols())) ||
+             ((b.cols() == 1) && (A.rows() == b.rows())))) &&
            "A*x must be a valid matrix product for linear(). And b should be a scalar or vector.");
-    std::vector<std::shared_ptr<Var<T>>> input_nodes{A, x, b};
-    return std::make_shared<Var<T>>(
-        A->rows(), x->cols(), (A->requires_grad() || x->requires_grad() || b->requires_grad()),
+    std::vector<Var<T>> input_nodes{A, x, b};
+    return std::make_shared<VarImpl<T>>(
+        A.rows(), x.cols(), (A.requires_grad() || x.requires_grad() || b.requires_grad()),
         input_nodes, std::make_unique<LinearEvalGrad<T>>());
 };
 
@@ -1510,11 +1609,11 @@ template <typename T = double> struct SoftmaxVEvalGrad : EvalGradFunctionBase<T>
         dest = dest.array().exp();
         dest = dest / dest.sum();
     };
-    std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) {
+    std::vector<TMat<T>> grad(const Var<T> &current) {
         std::vector<TMat<T>> res(k);
-        T s = (current->val().array() * current->grad().array()).sum();
+        T s = (current.val().array() * current.grad().array()).sum();
         for (int i = 0; i < k; ++i) {
-            T tmp = current->val().coeff(i, 0) * (current->grad().coeff(i, 0) - s);
+            T tmp = current.val().coeff(i, 0) * (current.grad().coeff(i, 0) - s);
             res[i] = eigen_scalar_mat(tmp);
         }
         return res;
@@ -1522,17 +1621,17 @@ template <typename T = double> struct SoftmaxVEvalGrad : EvalGradFunctionBase<T>
 };
 
 template <int D = -1, typename T = double>
-std::shared_ptr<Var<T>> softmax(const std::vector<std::shared_ptr<Var<T>>> &input_nodes) {
+Var<T> softmax(const std::vector<Var<T>> &input_nodes) {
     bool requires_grad = false;
     for (int i = 0; i < input_nodes.size(); ++i) {
-        assert((input_nodes[i]->size() == 1) && "Size of each node in softmax() should be 1.");
-        requires_grad = (requires_grad || input_nodes[i]->requires_grad());
+        assert((input_nodes[i].size() == 1) && "Size of each node in softmax() should be 1.");
+        requires_grad = (requires_grad || input_nodes[i].requires_grad());
     };
-    return std::make_shared<Var<T>>(input_nodes.size(), 1, requires_grad, input_nodes,
+    return std::make_shared<VarImpl<T>>(input_nodes.size(), 1, requires_grad, input_nodes,
                                     std::make_unique<SoftmaxVEvalGrad<T>>());
-};
+}
 
-}; // namespace DynAutoDiff
+}// namespace DynAutoDiff
 
 #undef UNWRAP
 #undef BINARYARITHOP

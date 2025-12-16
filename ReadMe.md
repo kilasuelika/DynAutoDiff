@@ -262,9 +262,9 @@ auto x=rowvec<double>({1,2,3})  //Correct.
 
 #### Automatic memory management
 
-There are a series of convinence functions for creating specific size variables: `mat, vec, rowvec, sca`. Each one has a c-version (constant, thus `requires_grad=false`) and p-version  (parameter, thus `requires_grad=true`).
+There are a series of convinence functions for creating specific size variables: `mat, vec, rowvec, sca`. Each one has a c-version (constant, thus `requires_grad=false`) and p-version  (parameter, thus `requires_grad=true`, like `pvec`).
 
-1. Only specify size, allo values are initialized to be 0s:
+1. Only specify size, all values are initialized to be 0s:
 
 ```cpp
 auto S=cmat(2,2); //2*2 size matrix

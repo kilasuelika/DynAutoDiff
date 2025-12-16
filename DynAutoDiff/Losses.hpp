@@ -49,12 +49,12 @@ template <typename T = double> struct BCELossEvalGrad : EvalGradFunctionBase<T> 
             }
         }
     };
-    std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) override {
+    std::vector<TMat<T>> grad(const Var<T> &current) override {
         std::vector<TMat<T>> res(2);
-        const auto &input = current->input_node(0)->val();
-        const auto &target = current->input_node(1)->val();
+        const auto &input = current.input_node(0).val();
+        const auto &target = current.input_node(1).val();
 
-        [[likely]] if (current->input_node(0)->requires_grad()) {
+        [[likely]] if (current.input_node(0).requires_grad()) {
             TMat<T> input_g(N, 1);
 
             for (int i = 0; i < N; ++i) {
@@ -64,15 +64,15 @@ template <typename T = double> struct BCELossEvalGrad : EvalGradFunctionBase<T> 
                     input_g.coeffRef(i, 0) = 1.0 / (1 - input.coeff(i, 0));
             }
             if (R == Reduction::None) {
-                res[0] = input_g.array() * current->grad().array();
+                res[0] = input_g.array() * current.grad().array();
             } else {
-                res[0] = input_g * current->grad().coeff(0, 0);
+                res[0] = input_g * current.grad().coeff(0, 0);
                 if (R == Reduction::Mean) {
                     res[0] = res[0] / N;
                 }
             }
         }
-        [[unlikely]] if (current->input_node(1)->requires_grad()) {
+        [[unlikely]] if (current.input_node(1).requires_grad()) {
             TMat<T> target_g(N, 1);
 
             for (int i = 0; i < N; ++i) {
@@ -82,9 +82,9 @@ template <typename T = double> struct BCELossEvalGrad : EvalGradFunctionBase<T> 
                     target_g.coeffRef(i, 0) = std::log(1 - input.coeff(i, 0));
             }
             if (R == Reduction::None) {
-                res[1] = target_g.array() * current->grad().array();
+                res[1] = target_g.array() * current.grad().array();
             } else {
-                res[1] = target_g * current->grad().coeff(0, 0);
+                res[1] = target_g * current.grad().coeff(0, 0);
                 if (R == Reduction::Mean) {
                     res[1] = res[1] / N;
                 }
@@ -119,28 +119,28 @@ template <typename T = double> struct MSELossEvalGrad : EvalGradFunctionBase<T> 
             }
         }
     };
-    std::vector<TMat<T>> grad(const std::shared_ptr<Var<T>> &current) override {
+    std::vector<TMat<T>> grad(const Var<T> &current) override {
         std::vector<TMat<T>> res(2);
-        const auto &input = current->input_node(0)->val();
-        const auto &target = current->input_node(1)->val();
+        const auto &input = current.input_node(0).val();
+        const auto &target = current.input_node(1).val();
 
-        [[likely]] if (current->input_node(0)->requires_grad()) {
+        [[likely]] if (current.input_node(0).requires_grad()) {
             if (R == Reduction::None) {
-                res[0] = 2 * (input.array() - target.array()) * current->grad().array();
+                res[0] = 2 * (input.array() - target.array()) * current.grad().array();
             } else {
-                res[0] = 2 * (input.array() - target.array()) * current->grad().coeff(0, 0);
+                res[0] = 2 * (input.array() - target.array()) * current.grad().coeff(0, 0);
                 if (R == Reduction::Mean) {
                     res[0] = res[0] / N;
                 }
             }
         }
-        [[unlikely]] if (current->input_node(1)->requires_grad()) {
-            if (current->input_node(0)->requires_grad()) {
+        [[unlikely]] if (current.input_node(1).requires_grad()) {
+            if (current.input_node(0).requires_grad()) {
                 res[1] = -res[0];
             } else if (R == Reduction::None) {
-                res[1] = -2 * (input.array() - target.array()) * current->grad().array();
+                res[1] = -2 * (input.array() - target.array()) * current.grad().array();
             } else {
-                res[1] = -2 * (input.array() - target.array()) * current->grad().coeff(0, 0);
+                res[1] = -2 * (input.array() - target.array()) * current.grad().coeff(0, 0);
                 if (R == Reduction::Mean) {
                     res[1] = res[1] / N;
                 }
@@ -152,16 +152,16 @@ template <typename T = double> struct MSELossEvalGrad : EvalGradFunctionBase<T> 
 
 #define LOSSFUNCTIONTEMPLATE(functionname, structname, assertstmt)                                 \
     template <Reduction R = Sum,typename T = double>                                              \
-    std::shared_ptr<Var<T>> functionname(std::shared_ptr<Var<T>> input,                            \
-                                         std::shared_ptr<Var<T>> target) {                         \
-        assertstmt std::vector<std::shared_ptr<Var<T>>> input_nodes{input, target};                \
+    Var<T> functionname(Var<T> input,                            \
+                                         Var<T> target) {                         \
+        assertstmt std::vector<Var<T>> input_nodes{input, target};                \
         if constexpr (R == Reduction::None) {                                                      \
             return std::make_shared<Var<T>>(                                                       \
-                input->rows(), 1, (input->requires_grad() || target->requires_grad()),             \
+                input->rows(), 1, (input.requires_grad() || target.requires_grad()),             \
                 input_nodes, std::make_unique<structname##EvalGrad<T>>(R));                        \
         } else {                                                                                   \
             return std::make_shared<Var<T>>(                                                       \
-                1, 1, (input->requires_grad() || target->requires_grad()), input_nodes,            \
+                1, 1, (input.requires_grad() || target.requires_grad()), input_nodes,            \
                 std::make_unique<structname##EvalGrad<T>>(R));                                     \
         }                                                                                          \
     };
