@@ -116,7 +116,7 @@ template <typename T = double> class VarImpl : public std::enable_shared_from_th
   public:
     using Scalar = T;
 
-    VarImpl(){};
+    VarImpl(){}
     VarImpl(int rows, int cols, bool requires_grad = false, bool allocate = true)
         : _rows(rows), _cols(cols), _size(rows * cols), _requires_grad(requires_grad),
           _val(nullptr, 0, 0), _grad(nullptr, 0, 0) {
@@ -129,7 +129,7 @@ template <typename T = double> class VarImpl : public std::enable_shared_from_th
             };
             _bind(v, g, rows, cols, true, requires_grad);
         }
-    };
+    }
     VarImpl(int rows, int cols, bool requires_grad,
         const std::vector<Var<T>> &input_nodes,
         std::unique_ptr<EvalGradFunctionBase<T>> fn)
@@ -144,7 +144,7 @@ template <typename T = double> class VarImpl : public std::enable_shared_from_th
         };
         _bind(v, g, rows, cols, true, requires_grad);
     };
-    VarImpl(T *val, T *grad, int rows, int cols)
+    VarImpl(T *val, T *grad, int rows, int cols, bool requires_grad)
         : _rows(rows), _cols(cols), _size(rows * cols), _requires_grad(requires_grad),
           _val(nullptr, 0, 0), _grad(nullptr, 0, 0) {
         _bind(val, grad, rows, cols, false, false);
@@ -182,10 +182,22 @@ template <typename T = double> class VarImpl : public std::enable_shared_from_th
         if (_requires_grad) {
             if (_own_g) {
                 _alloc.deallocate(_grad.data(), _size);
-            };
-        };
-    };
-    ~VarImpl() { release_memory(); };
+            }
+        }
+    }
+    ~VarImpl() { release_memory(); }
+
+    std::shared_ptr<VarImpl> operator()(int i, int j){
+        if (i>=_rows || j>=_cols || i<0 || j<0){
+            throw std::range_error(std::format("Subscript out of bound in VarImpl::operator({},{})",i,j));
+        }
+        // Note data is row order.
+        int id=i*cols()+j;
+        return std::make_shared<VarImpl>(&_val(id), &_grad(id),1,1, requires_grad());
+    }
+    std::shared_ptr<VarImpl> operator()(int i) {
+        return this->operator()(i,0);
+    }
 
     void setRandom() { _val.setRandom(); };
     void setRandomNormal(int seed = -1) {
@@ -384,6 +396,13 @@ public:
         return inv(this);
     }
 
+    // Subscript
+    Var operator()(int i, int j) const {
+        return var_->operator()(i,j);
+    }
+    Var operator()(int i) const {
+        return var_->operator()(i);
+    }
 /**
  *info
  **/
@@ -430,7 +449,10 @@ public:
     const T *cgbegin() const { return var_->cgbegin(); };
     const T *cgend() const { return var_->cgend(); };
     T *gbegin() { return var_->gbegin(); };
-    T *gend() { return var_->gend(); };
+    T *gend() { return var_->gend(); }
+
+
+
 protected:
     std::shared_ptr<VarImpl<T>> var_;
 };
